@@ -1,0 +1,88 @@
+// --- Plugin config types + defaults ---
+
+export interface ClawnetAccount {
+  id: string;
+  token: string; // env var ref like "${CLAWNET_TOKEN_MAIN}" or raw token
+  agentId: string; // OpenClaw agentId to route messages to
+  enabled: boolean;
+}
+
+export interface ClawnetConfig {
+  baseUrl: string;
+  pollEverySeconds: number;
+  debounceSeconds: number;
+  maxBatchSize: number;
+  deliver: { channel: string };
+  accounts: ClawnetAccount[];
+  maxSnippetChars: number;
+  setupVersion: number;
+}
+
+const DEFAULTS: ClawnetConfig = {
+  baseUrl: "https://api.clwnt.com",
+  pollEverySeconds: 120,
+  debounceSeconds: 30,
+  maxBatchSize: 10,
+  deliver: { channel: "last" },
+  accounts: [],
+  maxSnippetChars: 500,
+  setupVersion: 0,
+};
+
+export function parseConfig(raw: Record<string, unknown>): ClawnetConfig {
+  return {
+    baseUrl: typeof raw.baseUrl === "string" ? raw.baseUrl : DEFAULTS.baseUrl,
+    pollEverySeconds:
+      typeof raw.pollEverySeconds === "number" && raw.pollEverySeconds >= 10
+        ? raw.pollEverySeconds
+        : DEFAULTS.pollEverySeconds,
+    deliver: {
+      channel:
+        typeof (raw.deliver as any)?.channel === "string"
+          ? (raw.deliver as any).channel
+          : DEFAULTS.deliver.channel,
+    },
+    debounceSeconds:
+      typeof raw.debounceSeconds === "number" && raw.debounceSeconds >= 0
+        ? raw.debounceSeconds
+        : DEFAULTS.debounceSeconds,
+    maxBatchSize:
+      typeof raw.maxBatchSize === "number" && raw.maxBatchSize >= 1
+        ? raw.maxBatchSize
+        : DEFAULTS.maxBatchSize,
+    accounts: Array.isArray(raw.accounts)
+      ? raw.accounts.map(parseAccount).filter((a): a is ClawnetAccount => a !== null)
+      : DEFAULTS.accounts,
+    maxSnippetChars:
+      typeof raw.maxSnippetChars === "number"
+        ? raw.maxSnippetChars
+        : DEFAULTS.maxSnippetChars,
+    setupVersion:
+      typeof raw.setupVersion === "number" ? raw.setupVersion : DEFAULTS.setupVersion,
+  };
+}
+
+function parseAccount(raw: unknown): ClawnetAccount | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.id !== "string" || typeof r.token !== "string" || typeof r.agentId !== "string") {
+    return null;
+  }
+  return {
+    id: r.id,
+    token: r.token,
+    agentId: r.agentId,
+    enabled: r.enabled !== false,
+  };
+}
+
+/**
+ * Resolve a token value — handles "${ENV_VAR}" references.
+ */
+export function resolveToken(token: string): string {
+  const match = token.match(/^\$\{(.+)\}$/);
+  if (match) {
+    return process.env[match[1]] || "";
+  }
+  return token;
+}
