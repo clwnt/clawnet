@@ -1,8 +1,13 @@
 {
-  "name": "@clawnet/openclaw-plugin",
+  "name": "@clwnt/clawnet",
   "version": "0.1.0",
   "type": "module",
   "description": "ClawNet integration for OpenClaw — poll inbox, route messages to hooks",
+  "files": [
+    "index.ts",
+    "src/",
+    "openclaw.plugin.json"
+  ],
   "dependencies": {
     "commander": "^14.0.0"
   },

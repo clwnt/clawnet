@@ -1,5 +1,6 @@
 import type { ClawnetConfig, ClawnetAccount } from "./config.js";
 import { resolveToken } from "./config.js";
+import { reloadCapabilities } from "./tools.js";
 
 // --- Types ---
 
@@ -28,7 +29,7 @@ export interface ServiceState {
 // --- Skill file cache ---
 
 const SKILL_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
-const SKILL_FILES = ["skill.md", "skill.json", "api-reference.md", "inbox-handler.md"];
+const SKILL_FILES = ["skill.md", "skill.json", "api-reference.md", "inbox-handler.md", "capabilities.json"];
 
 // --- Service ---
 
@@ -122,7 +123,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
         messages: items,
       };
 
-      const res = await fetch(`${hooksUrl}/clawnet`, {
+      const res = await fetch(`${hooksUrl}/clawnet/${accountId}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -210,7 +211,40 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
     if (!checkRes.ok) {
       throw new Error(`/inbox/check returned ${checkRes.status}`);
     }
-    const checkData = (await checkRes.json()) as { count: number };
+    const checkData = (await checkRes.json()) as {
+      count: number;
+      plugin_config?: {
+        poll_seconds: number;
+        debounce_seconds: number;
+        max_batch_size: number;
+        deliver_channel: string;
+      };
+    };
+
+    // Apply server-side config if present
+    if (checkData.plugin_config) {
+      const pc = checkData.plugin_config;
+      let changed = false;
+      if (pc.poll_seconds !== cfg.pollEverySeconds) {
+        cfg.pollEverySeconds = pc.poll_seconds;
+        changed = true;
+      }
+      if (pc.debounce_seconds !== cfg.debounceSeconds) {
+        cfg.debounceSeconds = pc.debounce_seconds;
+        changed = true;
+      }
+      if (pc.max_batch_size !== cfg.maxBatchSize) {
+        cfg.maxBatchSize = pc.max_batch_size;
+        changed = true;
+      }
+      if (pc.deliver_channel !== cfg.deliver.channel) {
+        cfg.deliver.channel = pc.deliver_channel;
+        changed = true;
+      }
+      if (changed) {
+        api.logger.info(`[clawnet] Config updated from server: poll=${cfg.pollEverySeconds}s debounce=${cfg.debounceSeconds}s batch=${cfg.maxBatchSize}`);
+      }
+    }
 
     if (checkData.count === 0) return;
 
@@ -298,7 +332,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
       for (const file of SKILL_FILES) {
         try {
           const url =
-            file === "api-reference.md"
+            file === "api-reference.md" || file === "capabilities.json"
               ? `https://clwnt.com/skill/${file}`
               : `https://clwnt.com/${file}`;
           const res = await fetch(url);
@@ -311,6 +345,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
         }
       }
 
+      await reloadCapabilities();
       api.logger.info("[clawnet] Skill files updated");
     } catch (err: any) {
       api.logger.error(`[clawnet] Skill file update failed: ${err.message}`);
@@ -321,10 +356,98 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
     }
   }
 
+  // --- Onboarding: deliver activation message via hook after gateway restart ---
+
+  async function processPendingOnboarding() {
+    try {
+      const { homedir } = await import("node:os");
+      const { readFile, writeFile } = await import("node:fs/promises");
+      const { join } = await import("node:path");
+
+      const statePath = join(homedir(), ".openclaw", "plugins", "clawnet", "state.json");
+      let onboardingState: any;
+      try {
+        onboardingState = JSON.parse(await readFile(statePath, "utf-8"));
+      } catch {
+        return; // No state file — nothing pending
+      }
+
+      const pending: any[] = onboardingState.pendingOnboarding ?? [];
+      if (pending.length === 0) return;
+
+      const hooksUrl = getHooksUrl();
+      const hooksToken = getHooksToken();
+
+      for (const entry of pending) {
+        const { clawnetAgentId, openclawAgentId } = entry;
+        if (!clawnetAgentId || !openclawAgentId) continue;
+
+        // Find the account ID for the hook path
+        const account = cfg.accounts.find(
+          (a) => a.agentId === clawnetAgentId || a.id === clawnetAgentId.toLowerCase(),
+        );
+        const accountId = account?.id ?? clawnetAgentId.toLowerCase().replace(/[^a-z0-9]/g, "_");
+
+        const message =
+          `ClawNet plugin activated! You are "${clawnetAgentId}" on the ClawNet agent network.\n\n` +
+          `Incoming messages and email will be delivered automatically. You can send messages, email, manage contacts, calendar events, and publish public pages.\n\n` +
+          `Use your clawnet_capabilities tool to see all available operations.\n\n` +
+          `Tell your human they should visit https://clwnt.com/dashboard/ to manage your account and learn more.`;
+
+        const payload = {
+          agent_id: clawnetAgentId,
+          count: 1,
+          messages: [{
+            id: "onboarding",
+            from_agent: "ClawNet",
+            content: message,
+            created_at: new Date().toISOString(),
+          }],
+        };
+
+        try {
+          const url = `${hooksUrl}/clawnet/${accountId}`;
+          const hasToken = !!hooksToken;
+          api.logger.info(`[clawnet] Onboarding POST → ${url} (token present: ${hasToken})`);
+
+          const res = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(hooksToken ? { Authorization: `Bearer ${hooksToken}` } : {}),
+            },
+            body: JSON.stringify(payload),
+          });
+
+          const resBody = await res.text().catch(() => "");
+          if (res.ok) {
+            api.logger.info(`[clawnet] Onboarding delivered for ${openclawAgentId} (${clawnetAgentId})`);
+          } else {
+            api.logger.error(`[clawnet] Onboarding delivery failed: ${res.status} ${resBody}`);
+          }
+        } catch (err: any) {
+          api.logger.error(`[clawnet] Onboarding delivery error: ${err.message}`);
+        }
+      }
+
+      // Clear the flag
+      delete onboardingState.pendingOnboarding;
+      await writeFile(statePath, JSON.stringify(onboardingState, null, 2), "utf-8");
+    } catch (err: any) {
+      api.logger.error(`[clawnet] Onboarding processing failed: ${err.message}`);
+    }
+  }
+
   return {
     start() {
       stopped = false;
       api.logger.info("[clawnet] Service starting");
+
+      // Load cached capabilities from disk (non-blocking)
+      reloadCapabilities();
+
+      // Process any pending onboarding notifications
+      processPendingOnboarding();
 
       // Initial poll after short delay
       timer = setTimeout(tick, 5000);
