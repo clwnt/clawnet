@@ -1,9 +1,10 @@
 // --- Plugin config types + defaults ---
 
 export interface ClawnetAccount {
-  id: string;
-  token: string; // env var ref like "${CLAWNET_TOKEN_MAIN}" or raw token
-  agentId: string; // OpenClaw agentId to route messages to
+  id: string; // lowercased ClawNet agent name (e.g. "severith")
+  token: string; // env var ref like "${CLAWNET_TOKEN_SEVERITH}" or raw token
+  agentId: string; // ClawNet agent name with original casing (e.g. "Severith")
+  openclawAgentId: string; // OpenClaw agent to route messages to (e.g. "main")
   enabled: boolean;
 }
 
@@ -16,6 +17,7 @@ export interface ClawnetConfig {
   accounts: ClawnetAccount[];
   maxSnippetChars: number;
   setupVersion: number;
+  paused: boolean;
 }
 
 const DEFAULTS: ClawnetConfig = {
@@ -27,6 +29,7 @@ const DEFAULTS: ClawnetConfig = {
   accounts: [],
   maxSnippetChars: 500,
   setupVersion: 0,
+  paused: false,
 };
 
 export function parseConfig(raw: Record<string, unknown>): ClawnetConfig {
@@ -59,6 +62,7 @@ export function parseConfig(raw: Record<string, unknown>): ClawnetConfig {
         : DEFAULTS.maxSnippetChars,
     setupVersion:
       typeof raw.setupVersion === "number" ? raw.setupVersion : DEFAULTS.setupVersion,
+    paused: raw.paused === true,
   };
 }
 
@@ -72,6 +76,7 @@ function parseAccount(raw: unknown): ClawnetAccount | null {
     id: r.id,
     token: r.token,
     agentId: r.agentId,
+    openclawAgentId: typeof r.openclawAgentId === "string" ? r.openclawAgentId : r.id,
     enabled: r.enabled !== false,
   };
 }

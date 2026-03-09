@@ -12,12 +12,14 @@ function getAccountForAgent(cfg: ClawnetConfig, openclawAgentId?: string) {
       if (token) return { ...match, resolvedToken: token };
     }
   }
-  // Fallback to first enabled account (single-agent or unmatched)
-  const account = cfg.accounts.find((a) => a.enabled);
-  if (!account) return null;
-  const token = resolveToken(account.token);
+  // Fallback: prefer account mapped to "main" (default agent), then first enabled
+  const fallback =
+    cfg.accounts.find((a) => a.enabled && a.openclawAgentId === "main") ??
+    cfg.accounts.find((a) => a.enabled);
+  if (!fallback) return null;
+  const token = resolveToken(fallback.token);
   if (!token) return null;
-  return { ...account, resolvedToken: token };
+  return { ...fallback, resolvedToken: token };
 }
 
 function authHeaders(token: string) {
@@ -270,14 +272,38 @@ export async function reloadCapabilities(): Promise<void> {
   }
 }
 
+// --- Tool descriptions (cached from server, loaded at startup) ---
+
+let cachedToolDescs: Record<string, string> = {};
+
+export function loadToolDescriptions(): void {
+  try {
+    const { readFileSync } = require("node:fs");
+    const { join } = require("node:path");
+    const { homedir } = require("node:os");
+    const filePath = join(homedir(), ".openclaw", "plugins", "clawnet", "docs", "tool-descriptions.json");
+    const data = JSON.parse(readFileSync(filePath, "utf-8"));
+    if (data && typeof data === "object") {
+      cachedToolDescs = data;
+    }
+  } catch {
+    // File missing — use hardcoded defaults
+  }
+}
+
+function toolDesc(name: string, fallback: string): string {
+  return cachedToolDescs[name] || fallback;
+}
+
 // --- Tool registration ---
 
 export function registerTools(api: any, cfg: ClawnetConfig) {
+  // Load cached descriptions synchronously-safe (already loaded by service start)
   // --- Blessed tools (high-traffic, dedicated) ---
 
   api.registerTool({
     name: "clawnet_inbox_check",
-    description: "Check if you have new ClawNet messages. Returns count of actionable messages. Lightweight — use this before fetching full inbox.",
+    description: toolDesc("clawnet_inbox_check", "Check if you have new ClawNet messages. Returns count of actionable messages. Lightweight — use this before fetching full inbox."),
     parameters: {
       type: "object",
       properties: {},
@@ -290,7 +316,7 @@ export function registerTools(api: any, cfg: ClawnetConfig) {
 
   api.registerTool({
     name: "clawnet_inbox",
-    description: "Get your ClawNet inbox messages. Returns message IDs, senders, content, and status. Default shows actionable messages (new + waiting + expired snoozes). For email, calendar, contacts, and more, call clawnet_capabilities.",
+    description: toolDesc("clawnet_inbox", "Get your ClawNet inbox messages. Returns message IDs, senders, content, and status. Default shows actionable messages (new + waiting + expired snoozes). For email, calendar, contacts, and more, call clawnet_capabilities."),
     parameters: {
       type: "object",
       properties: {
@@ -310,7 +336,7 @@ export function registerTools(api: any, cfg: ClawnetConfig) {
 
   api.registerTool({
     name: "clawnet_send",
-    description: "Send a message to another agent or an email address. If 'to' contains @, sends an email; otherwise sends a ClawNet DM.",
+    description: toolDesc("clawnet_send", "Send a message to another agent or an email address. If 'to' contains @, sends an email; otherwise sends a ClawNet DM."),
     parameters: {
       type: "object",
       properties: {
@@ -335,7 +361,7 @@ export function registerTools(api: any, cfg: ClawnetConfig) {
 
   api.registerTool({
     name: "clawnet_message_status",
-    description: "Set the status of a ClawNet inbox message. Use 'handled' when done, 'waiting' if human needs to decide, 'snoozed' to revisit later.",
+    description: toolDesc("clawnet_message_status", "Set the status of a ClawNet inbox message. Use 'handled' when done, 'waiting' if human needs to decide, 'snoozed' to revisit later."),
     parameters: {
       type: "object",
       properties: {
@@ -353,11 +379,32 @@ export function registerTools(api: any, cfg: ClawnetConfig) {
     },
   }, { optional: true });
 
+  // --- Rules lookup ---
+
+  api.registerTool({
+    name: "clawnet_rules",
+    description: toolDesc("clawnet_rules", "Look up message handling rules. Returns global rules and any agent-specific rules that apply. Call this when processing messages to check for standing instructions from your human."),
+    parameters: {
+      type: "object",
+      properties: {
+        scope: { type: "string", description: "'global' for network-wide rules, 'agent' for agent-specific rules, omit for both" },
+      },
+    },
+    async execute(_id: string, params: { scope?: string }, _onUpdate: unknown, ctx?: { agentId?: string }) {
+      const qs = new URLSearchParams();
+      if (params.scope) qs.set("scope", params.scope);
+      if (ctx?.agentId) qs.set("agent_id", ctx.agentId);
+      const query = qs.toString() ? `?${qs}` : "";
+      const result = await apiCall(cfg, "GET", `/rules${query}`, undefined, ctx?.agentId);
+      return textResult(result.data);
+    },
+  });
+
   // --- Discovery + generic executor ---
 
   api.registerTool({
     name: "clawnet_capabilities",
-    description: "List available ClawNet operations beyond the built-in tools. Use this to discover what you can do (social posts, email, calendar, profile, etc). Returns operation names, descriptions, and parameters.",
+    description: toolDesc("clawnet_capabilities", "List available ClawNet operations beyond the built-in tools. Use this to discover what you can do (social posts, email, calendar, profile, etc). Returns operation names, descriptions, and parameters."),
     parameters: {
       type: "object",
       properties: {
@@ -391,7 +438,7 @@ export function registerTools(api: any, cfg: ClawnetConfig) {
 
   api.registerTool({
     name: "clawnet_call",
-    description: "Execute any ClawNet operation by name. If you need any ClawNet action beyond the built-in tools, call clawnet_capabilities first, then use this tool. Do not guess operation names — always discover them first.",
+    description: toolDesc("clawnet_call", "Execute any ClawNet operation by name. If you need any ClawNet action beyond the built-in tools, call clawnet_capabilities first, then use this tool. Do not guess operation names — always discover them first."),
     parameters: {
       type: "object",
       properties: {

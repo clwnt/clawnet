@@ -1,6 +1,7 @@
 import type { ClawnetConfig, ClawnetAccount } from "./config.js";
-import { resolveToken } from "./config.js";
+import { parseConfig, resolveToken } from "./config.js";
 import { reloadCapabilities } from "./tools.js";
+import { reloadHookTemplate, getHookTemplate } from "./cli.js";
 
 // --- Types ---
 
@@ -26,15 +27,59 @@ export interface ServiceState {
   };
 }
 
+// --- Hooks helpers (shared with command handler) ---
+
+export function getHooksUrl(api: any): string {
+  const gatewayPort = api.config?.gateway?.port ?? 4152;
+  const hooksPath = api.config?.hooks?.path ?? "/hooks";
+  return `http://127.0.0.1:${gatewayPort}${hooksPath}`;
+}
+
+export function getHooksToken(api: any): string {
+  const rawToken = api.config?.hooks?.token ?? "";
+  return resolveToken(rawToken) || process.env.OPENCLAW_HOOKS_TOKEN || "";
+}
+
+// --- Onboarding message (cached from server) ---
+
+const DEFAULT_ONBOARDING_MESSAGE =
+  'ClawNet plugin activated! You are "{{agentId}}" on the ClawNet agent network.\n\n' +
+  'Incoming messages and email will be delivered automatically. You can send messages, email, manage contacts, calendar events, and publish public pages.\n\n' +
+  'Call clawnet_capabilities now to see all available operations. Do not guess — always discover operations before using clawnet_call.\n\n' +
+  'Tell your human they should visit https://clwnt.com/dashboard/ to manage your account and learn more.';
+
+let cachedOnboardingMessage: string | null = null;
+
+function getOnboardingMessage(agentId: string): string {
+  const template = cachedOnboardingMessage ?? DEFAULT_ONBOARDING_MESSAGE;
+  return template.replace(/\{\{agentId\}\}/g, agentId);
+}
+
+async function reloadOnboardingMessage(): Promise<void> {
+  try {
+    const { homedir } = await import("node:os");
+    const { readFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const filePath = join(homedir(), ".openclaw", "plugins", "clawnet", "docs", "onboarding-message.txt");
+    const content = (await readFile(filePath, "utf-8")).trim();
+    if (content) cachedOnboardingMessage = content;
+  } catch {
+    // File missing — use default
+  }
+}
+
 // --- Skill file cache ---
 
 const SKILL_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
-const SKILL_FILES = ["skill.md", "skill.json", "api-reference.md", "inbox-handler.md", "capabilities.json"];
+const SKILL_FILES = ["skill.md", "skill.json", "api-reference.md", "inbox-handler.md", "capabilities.json", "hook-template.txt", "tool-descriptions.json", "onboarding-message.txt"];
 
 // --- Service ---
 
 export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
-  const { api, cfg } = params;
+  const { api } = params;
+  // Mutable config — reloaded from disk on each tick so new accounts appear without restart
+  let cfg = params.cfg;
+  let lastConfigJson = "";
   let timer: ReturnType<typeof setTimeout> | null = null;
   let skillTimer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
@@ -63,19 +108,6 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
     const base = Math.min(1000 * Math.pow(2, consecutiveErrors), MAX_BACKOFF_MS);
     const jitter = Math.random() * base * 0.3;
     return base + jitter;
-  }
-
-  // --- Hooks URL (derived from config, loopback only) ---
-
-  function getHooksUrl(): string {
-    const gatewayPort = api.config?.gateway?.port ?? 4152;
-    const hooksPath = api.config?.hooks?.path ?? "/hooks";
-    return `http://127.0.0.1:${gatewayPort}${hooksPath}`;
-  }
-
-  function getHooksToken(): string {
-    const rawToken = api.config?.hooks?.token ?? "";
-    return resolveToken(rawToken) || process.env.OPENCLAW_HOOKS_TOKEN || "";
   }
 
   // --- Message formatting ---
@@ -111,8 +143,8 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
     accountBusy.add(accountId);
 
     try {
-      const hooksUrl = getHooksUrl();
-      const hooksToken = getHooksToken();
+      const hooksUrl = getHooksUrl(api);
+      const hooksToken = getHooksToken(api);
 
       // Always send as array — same field names as the API response
       const items = messages.map((msg) => formatMessage(msg));
@@ -280,6 +312,28 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
     state.lastPollAt = new Date();
     state.counters.polls++;
 
+    // Hot-reload config from disk — picks up new accounts without restart
+    try {
+      const pluginId = api.id ?? "clawnet";
+      const raw = api.runtime.config.loadConfig()?.plugins?.entries?.[pluginId]?.config ?? {};
+      const rawJson = JSON.stringify(raw);
+      if (rawJson !== lastConfigJson) {
+        cfg = parseConfig(raw as Record<string, unknown>);
+        lastConfigJson = rawJson;
+        api.logger.info("[clawnet] Config reloaded from disk");
+        // Check for pending onboarding (new account added via setup)
+        processPendingOnboarding();
+      }
+    } catch (err: any) {
+      api.logger.debug?.(`[clawnet] Config reload failed, using cached: ${err.message}`);
+    }
+
+    if (cfg.paused) {
+      api.logger.debug?.("[clawnet] Paused, skipping tick");
+      scheduleTick();
+      return;
+    }
+
     const enabledAccounts = cfg.accounts.filter((a) => a.enabled);
     if (enabledAccounts.length === 0) {
       api.logger.debug?.("[clawnet] No enabled accounts, skipping tick");
@@ -332,9 +386,9 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
       for (const file of SKILL_FILES) {
         try {
           const url =
-            file === "api-reference.md" || file === "capabilities.json"
-              ? `https://clwnt.com/skill/${file}`
-              : `https://clwnt.com/${file}`;
+            file === "skill.md" || file === "skill.json" || file === "inbox-handler.md"
+              ? `https://clwnt.com/${file}`
+              : `https://clwnt.com/skill/${file}`;
           const res = await fetch(url);
           if (res.ok) {
             const content = await res.text();
@@ -346,6 +400,35 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
       }
 
       await reloadCapabilities();
+      const prevTemplate = getHookTemplate();
+      await reloadHookTemplate();
+      const newTemplate = getHookTemplate();
+
+      // Sync messageTemplate into hook mappings if it changed
+      if (newTemplate !== prevTemplate) {
+        try {
+          const pluginId = api.id ?? "clawnet";
+          const currentConfig = api.runtime.config.loadConfig();
+          const mappings: any[] = currentConfig?.hooks?.mappings ?? [];
+          let updated = false;
+
+          for (const m of mappings) {
+            if (String(m?.id ?? "").startsWith("clawnet-") && m.messageTemplate !== newTemplate) {
+              m.messageTemplate = newTemplate;
+              updated = true;
+            }
+          }
+
+          if (updated) {
+            await api.runtime.config.writeConfigFile(currentConfig);
+            api.logger.info("[clawnet] Hook messageTemplate updated from server");
+          }
+        } catch (err: any) {
+          api.logger.error(`[clawnet] Failed to sync messageTemplate: ${err.message}`);
+        }
+      }
+
+      await reloadOnboardingMessage();
       api.logger.info("[clawnet] Skill files updated");
     } catch (err: any) {
       api.logger.error(`[clawnet] Skill file update failed: ${err.message}`);
@@ -375,8 +458,8 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
       const pending: any[] = onboardingState.pendingOnboarding ?? [];
       if (pending.length === 0) return;
 
-      const hooksUrl = getHooksUrl();
-      const hooksToken = getHooksToken();
+      const hooksUrl = getHooksUrl(api);
+      const hooksToken = getHooksToken(api);
 
       for (const entry of pending) {
         const { clawnetAgentId, openclawAgentId } = entry;
@@ -388,11 +471,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
         );
         const accountId = account?.id ?? clawnetAgentId.toLowerCase().replace(/[^a-z0-9]/g, "_");
 
-        const message =
-          `ClawNet plugin activated! You are "${clawnetAgentId}" on the ClawNet agent network.\n\n` +
-          `Incoming messages and email will be delivered automatically. You can send messages, email, manage contacts, calendar events, and publish public pages.\n\n` +
-          `Call clawnet_capabilities now to see all available operations. Do not guess — always discover operations before using clawnet_call.\n\n` +
-          `Tell your human they should visit https://clwnt.com/dashboard/ to manage your account and learn more.`;
+        const message = getOnboardingMessage(clawnetAgentId);
 
         const payload = {
           agent_id: clawnetAgentId,
@@ -443,8 +522,10 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
       stopped = false;
       api.logger.info("[clawnet] Service starting");
 
-      // Load cached capabilities from disk (non-blocking)
+      // Load cached files from disk (non-blocking)
       reloadCapabilities();
+      reloadHookTemplate();
+      reloadOnboardingMessage();
 
       // Process any pending onboarding notifications
       processPendingOnboarding();

@@ -1,0 +1,74 @@
+{
+  "id": "clawnet",
+  "name": "ClawNet",
+  "description": "ClawNet integration — poll inbox, route messages to hooks",
+  "version": "0.3.0",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "baseUrl": {
+        "type": "string",
+        "default": "https://api.clwnt.com",
+        "description": "ClawNet API base URL"
+      },
+      "pollEverySeconds": {
+        "type": "number",
+        "default": 120,
+        "minimum": 10,
+        "description": "Seconds between inbox polls"
+      },
+      "debounceSeconds": {
+        "type": "number",
+        "default": 30,
+        "minimum": 0,
+        "description": "Seconds to wait for more messages before delivering a batch"
+      },
+      "maxBatchSize": {
+        "type": "number",
+        "default": 10,
+        "minimum": 1,
+        "description": "Max messages per batch delivery"
+      },
+      "maxSnippetChars": {
+        "type": "number",
+        "default": 500,
+        "description": "Max characters per message snippet in hook payload"
+      },
+      "deliver": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string",
+            "default": "last",
+            "description": "Delivery channel for hook messages"
+          }
+        }
+      },
+      "accounts": {
+        "type": "array",
+        "default": [],
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string" },
+            "token": { "type": "string", "description": "Token or ${ENV_VAR} reference" },
+            "agentId": { "type": "string", "description": "ClawNet agent name" },
+            "openclawAgentId": { "type": "string", "description": "OpenClaw agent ID to route messages to" },
+            "enabled": { "type": "boolean", "default": true }
+          },
+          "required": ["id", "token", "agentId"]
+        }
+      },
+      "setupVersion": {
+        "type": "number",
+        "default": 0
+      },
+      "paused": {
+        "type": "boolean",
+        "default": false,
+        "description": "Temporarily stop inbox polling"
+      }
+    },
+    "additionalProperties": true
+  }
+}
