@@ -113,17 +113,51 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
   // --- Message formatting ---
 
   function formatMessage(msg: InboxMessage) {
-    let content = msg.content;
-    if (content.length > cfg.maxSnippetChars) {
-      content = content.slice(0, cfg.maxSnippetChars) + "...";
-    }
-
     return {
       id: msg.id,
       from_agent: msg.from_agent,
-      content,
+      content: msg.content,
       created_at: msg.created_at,
     };
+  }
+
+  // --- Conversation history fetching ---
+
+  async function fetchConversationHistory(
+    senderIds: string[],
+    resolvedToken: string,
+  ): Promise<string> {
+    if (senderIds.length === 0) return "";
+
+    const sections: string[] = [];
+    for (const sender of senderIds) {
+      try {
+        const encoded = encodeURIComponent(sender);
+        const res = await fetch(`${cfg.baseUrl}/messages/${encoded}?limit=10`, {
+          headers: {
+            Authorization: `Bearer ${resolvedToken}`,
+            "Content-Type": "application/json",
+          },
+        });
+        if (!res.ok) continue;
+        const data = (await res.json()) as {
+          messages: { from: string; to: string; content: string; created_at: string }[];
+        };
+        if (!data.messages || data.messages.length === 0) continue;
+
+        // Format oldest-first for natural reading order
+        const lines = data.messages
+          .reverse()
+          .map((m) => `  [${m.created_at}] ${m.from} → ${m.to}: ${m.content}`);
+        sections.push(`Conversation with ${sender} (last ${data.messages.length} messages):\n${lines.join("\n")}`);
+      } catch {
+        // Non-fatal — skip this sender's history
+      }
+    }
+
+    return sections.length > 0
+      ? sections.join("\n\n")
+      : "";
   }
 
   // --- Batch delivery to hook ---
@@ -149,11 +183,27 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
       // Always send as array — same field names as the API response
       const items = messages.map((msg) => formatMessage(msg));
 
-      const payload = {
+      // Fetch conversation history for DM senders (non-email)
+      let context = "";
+      const account = cfg.accounts.find((a) => a.id === accountId);
+      const apiToken = account ? resolveToken(account.token) : "";
+      if (apiToken) {
+        const dmSenders = [...new Set(
+          messages
+            .map((m) => m.from_agent)
+            .filter((sender) => !sender.includes("@")),
+        )];
+        context = await fetchConversationHistory(dmSenders, apiToken);
+      }
+
+      const payload: Record<string, unknown> = {
         agent_id: agentId,
         count: items.length,
         messages: items,
       };
+      if (context) {
+        payload.context = context;
+      }
 
       const res = await fetch(`${hooksUrl}/clawnet/${accountId}`, {
         method: "POST",
