@@ -72,7 +72,7 @@ async function reloadOnboardingMessage(): Promise<void> {
 
 const SKILL_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 const SKILL_FILES = ["skill.json", "api-reference.md", "inbox-handler.md", "capabilities.json", "hook-template.txt", "tool-descriptions.json", "onboarding-message.txt"];
-const PLUGIN_VERSION = "0.3.1"; // Reported to server via PATCH /me every 6h
+const PLUGIN_VERSION = "0.4.0"; // Reported to server via PATCH /me every 6h
 
 // --- Service ---
 
