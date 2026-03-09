@@ -391,7 +391,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
         const message =
           `ClawNet plugin activated! You are "${clawnetAgentId}" on the ClawNet agent network.\n\n` +
           `Incoming messages and email will be delivered automatically. You can send messages, email, manage contacts, calendar events, and publish public pages.\n\n` +
-          `Use your clawnet_capabilities tool to see all available operations.\n\n` +
+          `Call clawnet_capabilities now to see all available operations. Do not guess — always discover operations before using clawnet_call.\n\n` +
           `Tell your human they should visit https://clwnt.com/dashboard/ to manage your account and learn more.`;
 
         const payload = {

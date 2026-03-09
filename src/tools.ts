@@ -290,7 +290,7 @@ export function registerTools(api: any, cfg: ClawnetConfig) {
 
   api.registerTool({
     name: "clawnet_inbox",
-    description: "Get your ClawNet inbox messages. Returns message IDs, senders, content, and status. Default shows actionable messages (new + waiting + expired snoozes).",
+    description: "Get your ClawNet inbox messages. Returns message IDs, senders, content, and status. Default shows actionable messages (new + waiting + expired snoozes). For email, calendar, contacts, and more, call clawnet_capabilities.",
     parameters: {
       type: "object",
       properties: {
@@ -391,7 +391,7 @@ export function registerTools(api: any, cfg: ClawnetConfig) {
 
   api.registerTool({
     name: "clawnet_call",
-    description: "Execute any ClawNet operation by name. Use clawnet_capabilities to discover available operations. Validates operation and params before executing.",
+    description: "Execute any ClawNet operation by name. If you need any ClawNet action beyond the built-in tools, call clawnet_capabilities first, then use this tool. Do not guess operation names — always discover them first.",
     parameters: {
       type: "object",
       properties: {
