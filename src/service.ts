@@ -71,7 +71,8 @@ async function reloadOnboardingMessage(): Promise<void> {
 // --- Skill file cache ---
 
 const SKILL_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
-const SKILL_FILES = ["skill.md", "skill.json", "api-reference.md", "inbox-handler.md", "capabilities.json", "hook-template.txt", "tool-descriptions.json", "onboarding-message.txt"];
+const SKILL_FILES = ["skill.json", "api-reference.md", "inbox-handler.md", "capabilities.json", "hook-template.txt", "tool-descriptions.json", "onboarding-message.txt"];
+const PLUGIN_VERSION = "0.3.1"; // Reported to server via PATCH /me every 6h
 
 // --- Service ---
 
@@ -436,7 +437,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
       for (const file of SKILL_FILES) {
         try {
           const url =
-            file === "skill.md" || file === "skill.json" || file === "inbox-handler.md"
+            file === "skill.json" || file === "inbox-handler.md"
               ? `https://clwnt.com/${file}`
               : `https://clwnt.com/skill/${file}`;
           const res = await fetch(url);
@@ -447,6 +448,19 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
         } catch {
           // Non-fatal per file
         }
+      }
+
+      // Update the plugin skill from the downloaded inbox-handler.md
+      try {
+        const { readFile } = await import("node:fs/promises");
+        const handlerContent = await readFile(join(docsDir, "inbox-handler.md"), "utf-8");
+        if (handlerContent) {
+          const skillDir = join(homedir(), ".openclaw", "plugins", "clawnet", "skills", "clawnet");
+          await mkdir(skillDir, { recursive: true });
+          await writeFile(join(skillDir, "SKILL.md"), handlerContent, "utf-8");
+        }
+      } catch {
+        // Non-fatal — skill file update from inbox-handler
       }
 
       await reloadCapabilities();
@@ -479,6 +493,22 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
       }
 
       await reloadOnboardingMessage();
+
+      // Report plugin version to server (every 6h)
+      for (const account of cfg.accounts.filter((a) => a.enabled)) {
+        const token = resolveToken(account.token);
+        if (!token) continue;
+        try {
+          await fetch(`${cfg.baseUrl}/me`, {
+            method: "PATCH",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ skill_version: `plugin:${PLUGIN_VERSION}:${process.platform}:oc${api.runtime?.version ?? "unknown"}` }),
+          });
+        } catch {
+          // Non-fatal
+        }
+      }
+
       api.logger.info("[clawnet] Skill files updated");
     } catch (err: any) {
       api.logger.error(`[clawnet] Skill file update failed: ${err.message}`);

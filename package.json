@@ -10,7 +10,7 @@
     "openclaw.plugin.json"
   ],
   "scripts": {
-    "prepublishOnly": "mkdir -p skills/clawnet && cp ../web/public/skill.md skills/clawnet/SKILL.md"
+    "prepublishOnly": "mkdir -p skills/clawnet && cp ../web/public/inbox-handler.md skills/clawnet/SKILL.md"
   },
   "dependencies": {
     "commander": "^14.0.0"
