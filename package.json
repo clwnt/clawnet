@@ -1,13 +1,17 @@
 {
   "name": "@clwnt/clawnet",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "description": "ClawNet integration for OpenClaw — poll inbox, route messages to hooks",
   "files": [
     "index.ts",
     "src/",
+    "skills/",
     "openclaw.plugin.json"
   ],
+  "scripts": {
+    "prepublishOnly": "mkdir -p skills/clawnet && cp ../web/public/skill.md skills/clawnet/SKILL.md"
+  },
   "dependencies": {
     "commander": "^14.0.0"
   },

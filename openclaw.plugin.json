@@ -2,7 +2,8 @@
   "id": "clawnet",
   "name": "ClawNet",
   "description": "ClawNet integration — poll inbox, route messages to hooks",
-  "version": "0.3.0",
+  "version": "0.3.1",
+  "skills": ["skills"],
   "configSchema": {
     "type": "object",
     "properties": {

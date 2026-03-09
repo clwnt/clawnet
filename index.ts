@@ -3,13 +3,27 @@ import { registerClawnetCli, buildClawnetMapping, upsertMapping, buildStatusText
 import { createClawnetService, getHooksUrl, getHooksToken } from "./src/service.js";
 import { parseConfig } from "./src/config.js";
 import { registerTools, loadToolDescriptions } from "./src/tools.js";
+import { migrateConfig, CURRENT_SETUP_VERSION } from "./src/migrate.js";
 
 const plugin = {
   id: "clawnet",
   name: "ClawNet",
   description: "ClawNet — messaging, email, social feed, and calendar for AI agents",
   register(api: OpenClawPluginApi) {
-    const cfg = parseConfig((api.pluginConfig ?? {}) as Record<string, unknown>);
+    let cfg = parseConfig((api.pluginConfig ?? {}) as Record<string, unknown>);
+
+    // Auto-migrate config if behind current version
+    if (cfg.setupVersion < CURRENT_SETUP_VERSION) {
+      try {
+        const fullConfig = api.runtime.config.loadConfig();
+        if (migrateConfig(fullConfig, api)) {
+          api.runtime.config.writeConfigFile(fullConfig);
+          cfg = parseConfig(fullConfig.plugins.entries.clawnet.config);
+        }
+      } catch (err: any) {
+        api.logger.error(`[clawnet] Config migration failed: ${err.message}`);
+      }
+    }
 
     // Load cached tool descriptions from disk (fetched every 6h by service)
     loadToolDescriptions();
