@@ -687,11 +687,11 @@ export function registerClawnetCli(params: { program: Command; api: any; cfg: Cl
       console.log("");
     });
 
-  // --- uninstall ---
+  // --- disable ---
   root
-    .command("uninstall")
-    .option("--purge", "Remove config entirely (default: just disable)")
-    .description("Disable ClawNet plugin and remove hook mapping")
+    .command("disable")
+    .option("--purge", "Also remove account config (tokens, accounts)")
+    .description("Disable ClawNet plugin and remove hook mappings")
     .action(async (opts) => {
       const currentConfig = api.runtime.config.loadConfig();
       const cfg = { ...currentConfig };
@@ -716,20 +716,69 @@ export function registerClawnetCli(params: { program: Command; api: any; cfg: Cl
       }
       const removedCount = beforeCount - (cfg.hooks?.mappings?.length ?? 0);
 
-      console.log("\n  ClawNet uninstalled.\n");
-      console.log("  - Plugin disabled");
+      console.log("\n  ClawNet disabled.\n");
+      console.log("  - Plugin disabled (polling stopped)");
+      console.log("  - Hook mappings removed");
       if (removedCount > 0) {
-        console.log(`  - ${removedCount} hook mapping(s) removed`);
+        console.log(`    (${removedCount} mapping(s) cleaned up)`);
       }
+      console.log("");
+      console.log("  To re-enable: openclaw clawnet setup");
+      console.log("  To fully remove: openclaw plugins uninstall clawnet");
 
       // Do NOT touch: hooks.enabled, hooks.token, allowedSessionKeyPrefixes, allowedAgentIds
 
       await api.runtime.config.writeConfigFile(cfg);
 
-      console.log("  - hooks.enabled, hooks.token left untouched");
       if (opts.purge) {
-        console.log("  - Plugin config purged");
+        console.log("  - Account config purged");
       }
+      console.log("\n  Restart the Gateway to apply: openclaw gateway restart\n");
+    });
+
+  // --- enable ---
+  root
+    .command("enable")
+    .description("Re-enable a previously disabled ClawNet plugin")
+    .action(async () => {
+      const currentConfig = api.runtime.config.loadConfig();
+      const cfg = structuredClone(currentConfig);
+
+      const pluginEntry = cfg.plugins?.entries?.clawnet;
+      if (!pluginEntry) {
+        console.log("\n  No ClawNet config found. Run `openclaw clawnet setup` first.\n");
+        return;
+      }
+
+      if (pluginEntry.enabled) {
+        console.log("\n  ClawNet is already enabled.\n");
+        return;
+      }
+
+      pluginEntry.enabled = true;
+
+      // Restore hook mappings from accounts
+      const accounts: any[] = pluginEntry.config?.accounts ?? [];
+      const enabled = accounts.filter((a: any) => a.enabled !== false);
+      if (enabled.length > 0) {
+        cfg.hooks ??= {};
+        let mappings = cfg.hooks.mappings ?? [];
+        for (const account of enabled) {
+          const channel = pluginEntry.config?.deliver?.channel ?? "last";
+          mappings = upsertMapping(mappings, buildClawnetMapping(
+            account.id,
+            channel,
+            account.openclawAgentId ?? account.id,
+          ));
+        }
+        cfg.hooks.mappings = mappings;
+      }
+
+      await api.runtime.config.writeConfigFile(cfg);
+
+      console.log("\n  ClawNet enabled.\n");
+      console.log(`  - Plugin enabled (${enabled.length} account(s))`);
+      console.log(`  - Hook mappings restored`);
       console.log("\n  Restart the Gateway to apply: openclaw gateway restart\n");
     });
 }
