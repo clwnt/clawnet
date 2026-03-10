@@ -424,6 +424,7 @@ export function registerClawnetCli(params: { program: Command; api: any; cfg: Cl
           // Upsert account
           const accounts: any[] = pc.accounts ?? [];
           const existingIdx = accounts.findIndex((a: any) => a.agentId === agentId || a.openclawAgentId === targetAgent);
+          const oldAccountId = existingIdx >= 0 ? accounts[existingIdx].id : null;
           const newAccount = {
             id: accountId,
             token: `\${${envVarName}}`,
@@ -454,8 +455,15 @@ export function registerClawnetCli(params: { program: Command; api: any; cfg: Cl
             "hook:",
           );
 
-          // Upsert per-account clawnet mapping
+          // Remove old mapping if account ID changed (e.g., re-registered with new handle)
           let mappings = cfg.hooks.mappings ?? [];
+          if (oldAccountId && oldAccountId !== accountId) {
+            const oldMappingId = `clawnet-${oldAccountId}`;
+            mappings = mappings.filter((m: any) => String(m?.id ?? "") !== oldMappingId);
+            console.log(`  Removed stale mapping: ${oldMappingId}`);
+          }
+
+          // Upsert per-account clawnet mapping
           mappings = upsertMapping(mappings, buildClawnetMapping(accountId, channel, targetAgent));
           cfg.hooks.mappings = mappings;
 

@@ -72,7 +72,7 @@ async function reloadOnboardingMessage(): Promise<void> {
 
 const SKILL_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 const SKILL_FILES = ["skill.json", "api-reference.md", "inbox-handler.md", "capabilities.json", "hook-template.txt", "tool-descriptions.json", "onboarding-message.txt"];
-const PLUGIN_VERSION = "0.5.0"; // Reported to server via PATCH /me every 6h
+const PLUGIN_VERSION = "0.5.2"; // Reported to server via PATCH /me every 6h
 
 // --- Service ---
 
@@ -87,6 +87,10 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
 
   // Per-account concurrency lock: only 1 LLM run at a time per account
   const accountBusy = new Set<string>();
+
+  // Per-account delivery lock: skip re-delivery while LLM is processing
+  const deliveryLock = new Map<string, Date>(); // accountId -> lock expires at
+  const DELIVERY_LOCK_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
   // Per-account debounce: accumulate messages before sending
   const pendingMessages = new Map<string, InboxMessage[]>();
@@ -222,6 +226,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
 
       state.counters.batchesSent++;
       state.counters.delivered += messages.length;
+      deliveryLock.set(accountId, new Date(Date.now() + DELIVERY_LOCK_TTL_MS));
       api.logger.info(
         `[clawnet] ${accountId}: delivered ${messages.length} message(s) to ${agentId}`,
       );
@@ -329,7 +334,19 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
       }
     }
 
-    if (checkData.count === 0) return;
+    if (checkData.count === 0) {
+      // Inbox clear — release any delivery lock (agent finished processing)
+      deliveryLock.delete(account.id);
+      return;
+    }
+
+    // Skip if a recent webhook delivery is still being processed by the LLM.
+    // TTL-based lock: after successful POST, lock for 10 min to let the agent work.
+    const lockUntil = deliveryLock.get(account.id);
+    if (lockUntil && new Date() < lockUntil) {
+      api.logger.debug?.(`[clawnet] ${account.id}: ${checkData.count} message(s) waiting (delivery lock active, skipping)`);
+      return;
+    }
 
     state.lastInboxNonEmptyAt = new Date();
     api.logger.info(`[clawnet] ${account.id}: ${checkData.count} message(s) waiting`);
@@ -339,15 +356,24 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
     if (!inboxRes.ok) {
       throw new Error(`/inbox returned ${inboxRes.status}`);
     }
-    const inboxData = (await inboxRes.json()) as { messages: InboxMessage[] };
+    const inboxData = (await inboxRes.json()) as { messages: Array<Record<string, any>> };
 
     if (inboxData.messages.length === 0) return;
 
-    state.counters.messagesSeen += inboxData.messages.length;
+    // Normalize API field names: API returns "from", plugin uses "from_agent"
+    const normalized: InboxMessage[] = inboxData.messages.map((m) => ({
+      id: m.id,
+      from_agent: m.from_agent ?? m.from ?? "",
+      content: m.content,
+      subject: m.subject,
+      created_at: m.created_at,
+    }));
+
+    state.counters.messagesSeen += normalized.length;
 
     // Add to pending and schedule debounced flush
     const existing = pendingMessages.get(account.id) ?? [];
-    pendingMessages.set(account.id, [...existing, ...inboxData.messages]);
+    pendingMessages.set(account.id, [...existing, ...normalized]);
     scheduleFlush(account.id, account.agentId);
   }
 
