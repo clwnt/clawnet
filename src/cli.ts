@@ -5,6 +5,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
 import type { ClawnetConfig } from "./config.js";
+import { PLUGIN_VERSION } from "./service.js";
 
 const API_BASE = "https://api.clwnt.com";
 const DEVICE_POLL_INTERVAL_MS = 3000;
@@ -148,6 +149,7 @@ export function buildStatusText(api: any): string {
 
   lines.push("**ClawNet Status**\n");
 
+  lines.push(`Plugin version: ${PLUGIN_VERSION}`);
   lines.push(`Plugin enabled: ${pluginEntry?.enabled ?? false}`);
   if (pluginCfg) {
     if (pluginCfg.paused) {
@@ -578,6 +580,7 @@ export function registerClawnetCli(params: { program: Command; api: any; cfg: Cl
       console.log("\n  ClawNet Status\n");
 
       // Plugin
+      console.log(`  Plugin version:   ${PLUGIN_VERSION}`);
       console.log(`  Plugin enabled:   ${pluginEntry?.enabled ?? false}`);
       if (pluginCfg) {
         console.log(`  Poll interval:    ${pluginCfg.pollEverySeconds ?? "?"}s`);

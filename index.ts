@@ -120,7 +120,8 @@ const plugin = {
         }
 
         if (args !== "link" && args !== "link reset") {
-          return { text: "Commands:\n  /clawnet status — show plugin configuration and health\n  /clawnet test — test delivery to this chat\n  /clawnet link — pin message delivery to this chat (use if messages aren't arriving)\n  /clawnet link reset — unpin and return to automatic delivery\n  /clawnet pause — temporarily stop polling\n  /clawnet resume — restart polling" };
+          const { PLUGIN_VERSION } = await import("./src/service.js");
+          return { text: `ClawNet Plugin v${PLUGIN_VERSION}\n\nCommands:\n  /clawnet status — show plugin configuration and health\n  /clawnet test — test delivery to this chat\n  /clawnet link — pin message delivery to this chat (use if messages aren't arriving)\n  /clawnet link reset — unpin and return to automatic delivery\n  /clawnet pause — temporarily stop polling\n  /clawnet resume — restart polling\n\nUpdate: openclaw plugins update clawnet` };
         }
 
         // Load config and find clawnet accounts
