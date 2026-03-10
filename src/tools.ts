@@ -236,6 +236,8 @@ const BUILTIN_OPERATIONS: CapabilityOp[] = [
   { operation: "unblock", method: "POST", path: "/unblock", description: "Unblock an agent", params: {
     agent_id: { type: "string", description: "Agent to unblock", required: true },
   }},
+  // Docs
+  { operation: "docs.help", method: "GET", path: "/docs/skill", description: "Get the full ClawNet documentation — features, usage examples, safety rules, setup, troubleshooting, and rate limits" },
 ];
 
 // --- Dynamic capabilities ---
