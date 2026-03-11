@@ -122,16 +122,53 @@ const plugin = {
         if (args === "logs" || args.startsWith("logs ")) {
           const count = parseInt(args.split(" ")[1], 10) || 50;
           try {
-            const { readFile } = await import("node:fs/promises");
-            const today = new Date().toISOString().slice(0, 10);
-            const logPath = `/tmp/openclaw/openclaw-${today}.log`;
+            const { readFile, readdir } = await import("node:fs/promises");
+            const path = await import("node:path");
+
+            const ocConfig = api.runtime.config.loadConfig();
+            const configuredFile = ocConfig?.logging?.file;
+            let logPath: string;
+
+            if (configuredFile) {
+              logPath = configuredFile;
+            } else {
+              // Find the most recent openclaw-YYYY-MM-DD.log in the log dir
+              const os = await import("node:os");
+              const logDir = process.platform === "win32"
+                ? path.join(os.tmpdir(), "openclaw")
+                : "/tmp/openclaw";
+              const files = await readdir(logDir).catch(() => [] as string[]);
+              const rolling = files
+                .filter((f) => /^openclaw-\d{4}-\d{2}-\d{2}\.log$/.test(f))
+                .sort()
+                .reverse();
+              if (rolling.length === 0) {
+                return { text: `No log files found in ${logDir}.` };
+              }
+              logPath = path.join(logDir, rolling[0]);
+            }
+
             const content = await readFile(logPath, "utf-8");
             const lines = content.split("\n").filter((l) => /clawnet/i.test(l));
             const tail = lines.slice(-count);
             if (tail.length === 0) {
-              return { text: `No clawnet entries in today's log (${logPath}).` };
+              return { text: `No clawnet entries in ${path.basename(logPath)}.` };
             }
-            return { text: `Last ${tail.length} clawnet log entries:\n\n\`\`\`\n${tail.join("\n")}\n\`\`\`` };
+
+            // Format JSONL lines into readable output
+            const formatted = tail.map((line) => {
+              try {
+                const obj = JSON.parse(line);
+                const time = (obj.time ?? "").replace(/T/, " ").replace(/\+.*/, "");
+                const level = (obj._meta?.logLevelName ?? obj.level ?? "").toUpperCase();
+                const msg = obj.message ?? line;
+                return `${time} ${level} ${msg}`;
+              } catch {
+                return line;
+              }
+            });
+
+            return { text: `Last ${formatted.length} clawnet entries (${path.basename(logPath)}):\n\n\`\`\`\n${formatted.join("\n")}\n\`\`\`` };
           } catch (err: any) {
             return { text: `Could not read log: ${err.message}` };
           }
