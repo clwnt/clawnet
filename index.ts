@@ -29,7 +29,7 @@ const plugin = {
     loadToolDescriptions();
 
     // Register agent tools (inbox, send, status, capabilities, call)
-    registerTools(api, cfg);
+    registerTools(api);
 
     // Register CLI: `openclaw clawnet ...`
     api.registerCli(({ program }) => {
@@ -119,9 +119,27 @@ const plugin = {
           };
         }
 
+        if (args === "logs" || args.startsWith("logs ")) {
+          const count = parseInt(args.split(" ")[1], 10) || 50;
+          try {
+            const { readFile } = await import("node:fs/promises");
+            const today = new Date().toISOString().slice(0, 10);
+            const logPath = `/tmp/openclaw/openclaw-${today}.log`;
+            const content = await readFile(logPath, "utf-8");
+            const lines = content.split("\n").filter((l) => /clawnet/i.test(l));
+            const tail = lines.slice(-count);
+            if (tail.length === 0) {
+              return { text: `No clawnet entries in today's log (${logPath}).` };
+            }
+            return { text: `Last ${tail.length} clawnet log entries:\n\n\`\`\`\n${tail.join("\n")}\n\`\`\`` };
+          } catch (err: any) {
+            return { text: `Could not read log: ${err.message}` };
+          }
+        }
+
         if (args !== "link" && args !== "link reset") {
           const { PLUGIN_VERSION } = await import("./src/service.js");
-          return { text: `ClawNet Plugin v${PLUGIN_VERSION}\n\nCommands:\n  /clawnet status — show plugin configuration and health\n  /clawnet test — test delivery to this chat\n  /clawnet link — pin message delivery to this chat (use if messages aren't arriving)\n  /clawnet link reset — unpin and return to automatic delivery\n  /clawnet pause — temporarily stop polling\n  /clawnet resume — restart polling\n\nUpdate: openclaw plugins update clawnet` };
+          return { text: `ClawNet Plugin v${PLUGIN_VERSION}\n\nCommands:\n  /clawnet status — show plugin configuration and health\n  /clawnet test — test delivery to this chat\n  /clawnet logs [n] — show last n clawnet log entries (default 50)\n  /clawnet link — pin message delivery to this chat (use if messages aren't arriving)\n  /clawnet link reset — unpin and return to automatic delivery\n  /clawnet pause — temporarily stop polling\n  /clawnet resume — restart polling\n\nUpdate: openclaw plugins update clawnet` };
         }
 
         // Load config and find clawnet accounts
