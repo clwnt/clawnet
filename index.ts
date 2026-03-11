@@ -45,7 +45,49 @@ const plugin = {
         const args = (ctx.args ?? "").trim();
 
         if (args === "status") {
-          return { text: buildStatusText(api) };
+          let text = buildStatusText(api);
+
+          // Routing verification: call /me for each account and verify identity
+          const pluginId = api.id ?? "clawnet";
+          const currentConfig = api.runtime.config.loadConfig();
+          const statusCfg = currentConfig?.plugins?.entries?.[pluginId]?.config;
+          const statusAccounts: any[] = statusCfg?.accounts ?? [];
+          const enabledAccounts = statusAccounts.filter((a: any) => a.enabled !== false);
+          if (enabledAccounts.length > 0) {
+            const issues: string[] = [];
+            for (const account of enabledAccounts) {
+              const tokenRef = account.token ?? "";
+              const envMatch = tokenRef.match(/^\$\{(.+)\}$/);
+              const token = envMatch ? process.env[envMatch[1]] || "" : tokenRef;
+              if (!token) {
+                issues.push(`${account.agentId}: no token resolved`);
+                continue;
+              }
+              try {
+                const res = await fetch(`${statusCfg.baseUrl ?? "https://api.clwnt.com"}/me`, {
+                  headers: { Authorization: `Bearer ${token}` },
+                });
+                if (res.ok) {
+                  const me = (await res.json()) as { id?: string };
+                  if (me.id && me.id.toLowerCase() !== account.agentId.toLowerCase()) {
+                    issues.push(`${account.id}: token resolves to "${me.id}" but config expects "${account.agentId}"`);
+                  }
+                } else if (res.status === 401) {
+                  issues.push(`${account.agentId}: unauthorized (bad token)`);
+                }
+              } catch {
+                issues.push(`${account.agentId}: API unreachable`);
+              }
+            }
+            if (issues.length > 0) {
+              text += "\n\nRouting issues:";
+              for (const issue of issues) text += `\n  - ${issue}`;
+            } else if (enabledAccounts.length > 1) {
+              text += "\n\nRouting: all accounts verified";
+            }
+          }
+
+          return { text };
         }
 
         if (args === "pause" || args === "resume") {

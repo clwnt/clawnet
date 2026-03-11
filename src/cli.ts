@@ -653,9 +653,10 @@ export function registerClawnetCli(params: { program: Command; api: any; cfg: Cl
         }
       }
 
-      // Optional connectivity probe
+      // Optional connectivity + routing probe
       if (opts.probe && pluginCfg?.accounts) {
         console.log("\n  Connectivity:\n");
+        const routingIssues: string[] = [];
         for (const account of pluginCfg.accounts) {
           const tokenRef = account.token;
           const match = tokenRef.match(/^\$\{(.+)\}$/);
@@ -675,12 +676,42 @@ export function registerClawnetCli(params: { program: Command; api: any; cfg: Cl
               console.log(`    ${account.id}: OK (${data.count} pending)`);
             } else if (res.status === 401) {
               console.log(`    ${account.id}: UNAUTHORIZED (bad token)`);
+              continue;
             } else {
               console.log(`    ${account.id}: ERROR (${res.status})`);
+              continue;
             }
           } catch (err: any) {
             console.log(`    ${account.id}: UNREACHABLE (${err.message})`);
+            continue;
           }
+
+          // Routing verification: call /me and check the returned agent ID
+          try {
+            const meRes = await fetch(`${pluginCfg.baseUrl}/me`, {
+              headers: { Authorization: `Bearer ${resolvedToken}` },
+            });
+            if (meRes.ok) {
+              const meData = (await meRes.json()) as { id?: string };
+              const returnedId = meData.id ?? "?";
+              if (returnedId.toLowerCase() !== account.agentId.toLowerCase()) {
+                routingIssues.push(
+                  `${account.id}: token resolves to "${returnedId}" but config expects "${account.agentId}"`,
+                );
+              }
+            }
+          } catch {
+            // Non-fatal — connectivity already verified above
+          }
+        }
+
+        if (routingIssues.length > 0) {
+          console.log("\n  Routing issues:");
+          for (const issue of routingIssues) {
+            console.log(`    - ${issue}`);
+          }
+        } else if (pluginCfg.accounts.length > 1) {
+          console.log("\n  Routing: all accounts verified");
         }
       }
 

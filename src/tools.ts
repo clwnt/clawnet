@@ -328,25 +328,28 @@ function toolDesc(name: string, fallback: string): string {
 }
 
 // --- Tool registration ---
+// Tools are registered as factory functions so OpenClaw passes the session context
+// (agentId, sessionKey) at tool-resolution time. This is critical for multi-account
+// routing — without it, all tools fall back to the first/default account.
 
 export function registerTools(api: any) {
   // --- Blessed tools (high-traffic, dedicated) ---
 
-  api.registerTool({
+  api.registerTool((ctx: { agentId?: string; sessionKey?: string }) => ({
     name: "clawnet_inbox_check",
     description: toolDesc("clawnet_inbox_check", "Check if you have new ClawNet messages. Returns count of actionable messages. Lightweight — use this before fetching full inbox."),
     parameters: {
       type: "object",
       properties: {},
     },
-    async execute(_id: string, _params: unknown, _onUpdate: unknown, ctx?: { agentId?: string; sessionKey?: string }) {
+    async execute() {
       const cfg = loadFreshConfig(api);
       const result = await apiCall(cfg, "GET", "/inbox/check", undefined, ctx?.agentId, ctx?.sessionKey);
       return textResult(result.data);
     },
-  });
+  }));
 
-  api.registerTool({
+  api.registerTool((ctx: { agentId?: string; sessionKey?: string }) => ({
     name: "clawnet_inbox",
     description: toolDesc("clawnet_inbox", "Get your ClawNet inbox messages. Returns message IDs, senders, content, and status. Default shows actionable messages (new + waiting + expired snoozes). For email, calendar, contacts, and more, call clawnet_capabilities."),
     parameters: {
@@ -356,7 +359,7 @@ export function registerTools(api: any) {
         limit: { type: "number", description: "Max messages to return (default 50, max 200)" },
       },
     },
-    async execute(_id: string, params: { status?: string; limit?: number }, _onUpdate: unknown, ctx?: { agentId?: string; sessionKey?: string }) {
+    async execute(_id: string, params: { status?: string; limit?: number }) {
       const cfg = loadFreshConfig(api);
       const qs = new URLSearchParams();
       if (params.status) qs.set("status", params.status);
@@ -365,9 +368,9 @@ export function registerTools(api: any) {
       const result = await apiCall(cfg, "GET", `/inbox${query}`, undefined, ctx?.agentId, ctx?.sessionKey);
       return textResult(result.data);
     },
-  });
+  }));
 
-  api.registerTool({
+  api.registerTool((ctx: { agentId?: string; sessionKey?: string }) => ({
     name: "clawnet_send",
     description: toolDesc("clawnet_send", "Send a message to another agent or an email address. If 'to' contains @, sends an email; otherwise sends a ClawNet DM."),
     parameters: {
@@ -379,7 +382,7 @@ export function registerTools(api: any) {
       },
       required: ["to", "message"],
     },
-    async execute(_id: string, params: { to: string; message: string; subject?: string }, _onUpdate: unknown, ctx?: { agentId?: string; sessionKey?: string }) {
+    async execute(_id: string, params: { to: string; message: string; subject?: string }) {
       const cfg = loadFreshConfig(api);
       if (params.to.includes("@")) {
         // Route to email endpoint
@@ -391,9 +394,9 @@ export function registerTools(api: any) {
       const result = await apiCall(cfg, "POST", "/send", { to: params.to, message: params.message }, ctx?.agentId, ctx?.sessionKey);
       return textResult(result.data);
     },
-  }, { optional: true });
+  }), { optional: true });
 
-  api.registerTool({
+  api.registerTool((ctx: { agentId?: string; sessionKey?: string }) => ({
     name: "clawnet_message_status",
     description: toolDesc("clawnet_message_status", "Set the status of a ClawNet inbox message. Use 'handled' when done, 'waiting' if human needs to decide, 'snoozed' to revisit later."),
     parameters: {
@@ -405,18 +408,18 @@ export function registerTools(api: any) {
       },
       required: ["message_id", "status"],
     },
-    async execute(_id: string, params: { message_id: string; status: string; snoozed_until?: string }, _onUpdate: unknown, ctx?: { agentId?: string; sessionKey?: string }) {
+    async execute(_id: string, params: { message_id: string; status: string; snoozed_until?: string }) {
       const cfg = loadFreshConfig(api);
       const body: Record<string, unknown> = { status: params.status };
       if (params.snoozed_until) body.snoozed_until = params.snoozed_until;
       const result = await apiCall(cfg, "PATCH", `/messages/${params.message_id}/status`, body, ctx?.agentId, ctx?.sessionKey);
       return textResult(result.data);
     },
-  }, { optional: true });
+  }), { optional: true });
 
   // --- Rules lookup ---
 
-  api.registerTool({
+  api.registerTool((ctx: { agentId?: string; sessionKey?: string }) => ({
     name: "clawnet_rules",
     description: toolDesc("clawnet_rules", "Look up message handling rules. Returns global rules and any agent-specific rules that apply. Call this when processing messages to check for standing instructions from your human."),
     parameters: {
@@ -425,20 +428,22 @@ export function registerTools(api: any) {
         scope: { type: "string", description: "'global' for network-wide rules, 'agent' for agent-specific rules, omit for both" },
       },
     },
-    async execute(_id: string, params: { scope?: string }, _onUpdate: unknown, ctx?: { agentId?: string; sessionKey?: string }) {
+    async execute(_id: string, params: { scope?: string }) {
       const cfg = loadFreshConfig(api);
       const qs = new URLSearchParams();
       if (params.scope) qs.set("scope", params.scope);
-      if (ctx?.agentId) qs.set("agent_id", ctx.agentId);
+      // Resolve the ClawNet agent ID for rule filtering
+      const account = getAccountForAgent(cfg, ctx?.agentId, ctx?.sessionKey);
+      if (account) qs.set("agent_id", account.agentId);
       const query = qs.toString() ? `?${qs}` : "";
       const result = await apiCall(cfg, "GET", `/rules${query}`, undefined, ctx?.agentId, ctx?.sessionKey);
       return textResult(result.data);
     },
-  });
+  }));
 
   // --- Discovery + generic executor ---
 
-  api.registerTool({
+  api.registerTool((_ctx: { agentId?: string; sessionKey?: string }) => ({
     name: "clawnet_capabilities",
     description: toolDesc("clawnet_capabilities", "List available ClawNet operations beyond the built-in tools. Use this to discover what you can do (social posts, email, calendar, profile, etc). Returns operation names, descriptions, and parameters."),
     parameters: {
@@ -447,7 +452,7 @@ export function registerTools(api: any) {
         filter: { type: "string", description: "Filter by prefix (e.g. 'email', 'calendar', 'post', 'profile')" },
       },
     },
-    async execute(_id: string, params: { filter?: string }, _onUpdate: unknown, _ctx?: { agentId?: string; sessionKey?: string }) {
+    async execute(_id: string, params: { filter?: string }) {
       let ops = getOperations();
       if (params.filter) {
         const prefix = params.filter.toLowerCase();
@@ -470,9 +475,9 @@ export function registerTools(api: any) {
         },
       });
     },
-  });
+  }));
 
-  api.registerTool({
+  api.registerTool((ctx: { agentId?: string; sessionKey?: string }) => ({
     name: "clawnet_call",
     description: toolDesc("clawnet_call", "Execute any ClawNet operation by name. If you need any ClawNet action beyond the built-in tools, call clawnet_capabilities first, then use this tool. Do not guess operation names — always discover them first."),
     parameters: {
@@ -483,7 +488,7 @@ export function registerTools(api: any) {
       },
       required: ["operation"],
     },
-    async execute(_id: string, input: { operation: string; params?: Record<string, unknown> }, _onUpdate: unknown, ctx?: { agentId?: string; sessionKey?: string }) {
+    async execute(_id: string, input: { operation: string; params?: Record<string, unknown> }) {
       const cfg = loadFreshConfig(api);
       const op = getOperations().find((o) => o.operation === input.operation);
       if (!op) {
@@ -546,5 +551,5 @@ export function registerTools(api: any) {
         : await apiCall(cfg, op.method, path, body, ctx?.agentId, ctx?.sessionKey);
       return textResult(result.data);
     },
-  }, { optional: true });
+  }), { optional: true });
 }
