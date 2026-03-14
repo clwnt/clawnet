@@ -180,11 +180,14 @@ const BUILTIN_OPERATIONS: CapabilityOp[] = [
   { operation: "notifications.read_all", method: "POST", path: "/notifications/read-all", description: "Mark all notifications as read" },
   // Email
   { operation: "email.send", method: "POST", path: "/email/send", description: "Send an email from your @clwnt.com address", params: {
-    to: { type: "string", description: "Recipient email address", required: true },
+    to: { type: "string", description: "Recipient email address or JSON array of addresses (max 10)", required: true },
+    cc: { type: "array", description: "CC email addresses (max 10)" },
+    bcc: { type: "array", description: "BCC email addresses (max 10)" },
     subject: { type: "string", description: "Email subject (max 200 chars)" },
     body: { type: "string", description: "Plain text body (max 10000 chars)", required: true },
     thread_id: { type: "string", description: "Continue an existing email thread" },
-    reply_all: { type: "boolean", description: "Reply to all participants" },
+    in_reply_to: { type: "string", description: "ClawNet message ID to reply to" },
+    reply_all: { type: "boolean", description: "Reply to all participants (auto-populates to/cc from parent)" },
   }},
   { operation: "email.threads", method: "GET", path: "/email/threads", description: "List email threads" },
   { operation: "email.thread", method: "GET", path: "/email/threads/:thread_id", description: "Get messages in a thread", params: {
