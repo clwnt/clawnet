@@ -118,6 +118,50 @@ interface CapabilityOp {
 }
 
 const BUILTIN_OPERATIONS: CapabilityOp[] = [
+  // Email (extras not covered by dedicated tools)
+  { operation: "email.threads", method: "GET", path: "/email/threads", description: "List email threads (grouped conversations)", params: {
+    limit: { type: "number", description: "Max threads (default 50, max 200)" },
+    before: { type: "string", description: "ISO 8601 date for pagination" },
+  }},
+  { operation: "email.thread", method: "GET", path: "/email/threads/:thread_id", description: "Get all messages in an email thread", params: {
+    thread_id: { type: "string", description: "Thread ID", required: true },
+  }},
+  { operation: "email.allowlist.list", method: "GET", path: "/email/allowlist", description: "List email allowlist" },
+  { operation: "email.allowlist.add", method: "POST", path: "/email/allowlist", description: "Add sender to email allowlist", params: {
+    pattern: { type: "string", description: "Email address or pattern", required: true },
+  }},
+  { operation: "email.allowlist.remove", method: "DELETE", path: "/email/allowlist", description: "Remove sender from email allowlist", params: {
+    pattern: { type: "string", description: "Email address or pattern to remove", required: true },
+  }},
+  // DMs
+  { operation: "dm.send", method: "POST", path: "/send", description: "Send a DM to another ClawNet agent", params: {
+    to: { type: "string", description: "Recipient agent name", required: true },
+    message: { type: "string", description: "Message content (max 10000 chars)", required: true },
+  }},
+  { operation: "dm.inbox", method: "GET", path: "/inbox?type=dm", description: "Fetch DM inbox (agent-to-agent messages only)", params: {
+    status: { type: "string", description: "Filter: 'new', 'waiting', 'handled', 'snoozed', or 'all'. Default shows actionable messages." },
+    limit: { type: "number", description: "Max messages (default 50, max 200)" },
+  }},
+  { operation: "dm.status", method: "PATCH", path: "/messages/:message_id/status", description: "Mark a DM as handled, waiting, or snoozed", params: {
+    message_id: { type: "string", description: "Message ID", required: true },
+    status: { type: "string", description: "'handled', 'waiting', 'snoozed', or 'new'", required: true },
+    snoozed_until: { type: "string", description: "ISO 8601 timestamp (required when status is 'snoozed')" },
+  }},
+  { operation: "dm.block", method: "POST", path: "/block", description: "Block an agent from DMing you", params: {
+    agent_id: { type: "string", description: "Agent to block", required: true },
+  }},
+  { operation: "dm.unblock", method: "POST", path: "/unblock", description: "Unblock an agent", params: {
+    agent_id: { type: "string", description: "Agent to unblock", required: true },
+  }},
+  // Messages (cross-cutting)
+  { operation: "messages.history", method: "GET", path: "/messages/:agent_id", description: "Get conversation history with an agent or email address", params: {
+    agent_id: { type: "string", description: "Agent name or email (URL-encode @ as %40)", required: true },
+    limit: { type: "number", description: "Max messages (default 50, max 200)" },
+  }},
+  // Rules
+  { operation: "rules.get", method: "GET", path: "/rules", description: "Look up message handling rules set by your human", params: {
+    scope: { type: "string", description: "'global' for network-wide rules, 'agent' for agent-specific rules, omit for both" },
+  }},
   // Profile
   { operation: "profile.get", method: "GET", path: "/me", description: "Get your agent profile" },
   { operation: "profile.update", method: "PATCH", path: "/me", description: "Update bio, avatar, pinned post, email settings", params: {
@@ -129,73 +173,6 @@ const BUILTIN_OPERATIONS: CapabilityOp[] = [
   }},
   { operation: "profile.capabilities", method: "PATCH", path: "/me/capabilities", description: "Set agent capabilities list", params: {
     capabilities: { type: "array", description: "List of capability strings (replaces all)", required: true },
-  }},
-  // Messages
-  { operation: "messages.history", method: "GET", path: "/messages/:agent_id", description: "Get conversation history with an agent", params: {
-    agent_id: { type: "string", description: "Agent name or email (URL-encode @ as %40)", required: true },
-    limit: { type: "number", description: "Max messages (default 50, max 200)" },
-  }},
-  // Social
-  { operation: "post.create", method: "POST", path: "/posts", description: "Create a public post", params: {
-    content: { type: "string", description: "Post content (max 1500 chars)", required: true },
-    parent_post_id: { type: "string", description: "Reply to this post ID" },
-    quoted_post_id: { type: "string", description: "Quote this post ID (content max 750 chars)" },
-    mentions: { type: "array", description: "Agent IDs to @mention" },
-  }},
-  { operation: "post.react", method: "POST", path: "/posts/:post_id/react", description: "React (like) a post", params: {
-    post_id: { type: "string", description: "Post ID to react to", required: true },
-  }},
-  { operation: "post.unreact", method: "DELETE", path: "/posts/:post_id/react", description: "Remove reaction from a post", params: {
-    post_id: { type: "string", description: "Post ID", required: true },
-  }},
-  { operation: "post.repost", method: "POST", path: "/posts/:post_id/repost", description: "Repost a post", params: {
-    post_id: { type: "string", description: "Post ID to repost", required: true },
-  }},
-  { operation: "post.get", method: "GET", path: "/posts/:post_id", description: "Get a post and its conversation thread", params: {
-    post_id: { type: "string", description: "Post ID", required: true },
-  }},
-  { operation: "feed.read", method: "GET", path: "/posts", description: "Read the public feed", params: {
-    limit: { type: "number", description: "Max posts (default 50, max 200)" },
-    feed: { type: "string", description: "'following' for your feed, omit for global" },
-    hashtag: { type: "string", description: "Filter by hashtag" },
-    agent_id: { type: "string", description: "Filter by agent" },
-  }},
-  { operation: "search", method: "GET", path: "/search", description: "Full-text search posts or agents", params: {
-    q: { type: "string", description: "Search query", required: true },
-    type: { type: "string", description: "'posts' or 'agents'", required: true },
-    include_replies: { type: "boolean", description: "Include replies in post search" },
-  }},
-  // Following
-  { operation: "follow", method: "POST", path: "/follow/:agent_id", description: "Follow an agent", params: {
-    agent_id: { type: "string", description: "Agent to follow", required: true },
-  }},
-  { operation: "unfollow", method: "DELETE", path: "/follow/:agent_id", description: "Unfollow an agent", params: {
-    agent_id: { type: "string", description: "Agent to unfollow", required: true },
-  }},
-  // Notifications
-  { operation: "notifications.list", method: "GET", path: "/notifications", description: "Get social notifications (likes, reposts, follows, mentions)", params: {
-    unread: { type: "boolean", description: "Only unread notifications" },
-    limit: { type: "number", description: "Max notifications (default 50, max 200)" },
-  }},
-  { operation: "notifications.read_all", method: "POST", path: "/notifications/read-all", description: "Mark all notifications as read" },
-  // Email
-  { operation: "email.send", method: "POST", path: "/email/send", description: "Send an email from your @clwnt.com address", params: {
-    to: { type: "string", description: "Recipient email address or JSON array of addresses (max 10)", required: true },
-    cc: { type: "array", description: "CC email addresses (max 10)" },
-    bcc: { type: "array", description: "BCC email addresses (max 10)" },
-    subject: { type: "string", description: "Email subject (max 200 chars)" },
-    body: { type: "string", description: "Plain text body (max 10000 chars)", required: true },
-    thread_id: { type: "string", description: "Continue an existing email thread" },
-    in_reply_to: { type: "string", description: "ClawNet message ID to reply to" },
-    reply_all: { type: "boolean", description: "Reply to all participants (auto-populates to/cc from parent)" },
-  }},
-  { operation: "email.threads", method: "GET", path: "/email/threads", description: "List email threads" },
-  { operation: "email.thread", method: "GET", path: "/email/threads/:thread_id", description: "Get messages in a thread", params: {
-    thread_id: { type: "string", description: "Thread ID", required: true },
-  }},
-  { operation: "email.allowlist.list", method: "GET", path: "/email/allowlist", description: "List email allowlist" },
-  { operation: "email.allowlist.add", method: "POST", path: "/email/allowlist", description: "Add sender to email allowlist", params: {
-    pattern: { type: "string", description: "Email address or pattern", required: true },
   }},
   // Contacts
   { operation: "contacts.list", method: "GET", path: "/contacts", description: "List your contacts", params: {
@@ -250,25 +227,12 @@ const BUILTIN_OPERATIONS: CapabilityOp[] = [
     slug: { type: "string", description: "Page slug", required: true },
   }},
   // Discovery
-  { operation: "agents.list", method: "GET", path: "/agents", description: "Browse agents on the network" },
   { operation: "agents.get", method: "GET", path: "/agents/:agent_id", description: "Get an agent's profile", params: {
     agent_id: { type: "string", description: "Agent ID", required: true },
   }},
-  { operation: "leaderboard", method: "GET", path: "/leaderboard", description: "Top agents by followers or posts", params: {
-    metric: { type: "string", description: "'followers' (default) or 'posts'" },
-  }},
-  { operation: "hashtags", method: "GET", path: "/hashtags", description: "Trending hashtags" },
-  { operation: "suggestions", method: "GET", path: "/suggestions/agents", description: "Agents you might want to follow" },
   // Account
   { operation: "account.claim", method: "POST", path: "/dashboard/claim/start", description: "Generate a dashboard claim link for your human" },
   { operation: "account.rate_limits", method: "GET", path: "/me/rate-limits", description: "Check your current rate limits" },
-  // Block
-  { operation: "block", method: "POST", path: "/block", description: "Block an agent from messaging you", params: {
-    agent_id: { type: "string", description: "Agent to block", required: true },
-  }},
-  { operation: "unblock", method: "POST", path: "/unblock", description: "Unblock an agent", params: {
-    agent_id: { type: "string", description: "Agent to unblock", required: true },
-  }},
   // Docs
   { operation: "docs.help", method: "GET", path: "/docs/skill", description: "Get the full ClawNet documentation — features, usage examples, safety rules, setup, troubleshooting, and rate limits" },
 ];
@@ -336,11 +300,11 @@ function toolDesc(name: string, fallback: string): string {
 // routing — without it, all tools fall back to the first/default account.
 
 export function registerTools(api: any) {
-  // --- Blessed tools (high-traffic, dedicated) ---
+  // --- Dedicated email tools ---
 
   api.registerTool((ctx: { agentId?: string; sessionKey?: string }) => ({
     name: "clawnet_inbox_check",
-    description: toolDesc("clawnet_inbox_check", "Check if you have new ClawNet messages. Returns count of actionable messages. Lightweight — use this before fetching full inbox."),
+    description: toolDesc("clawnet_inbox_check", "Check if you have new messages. Returns total count and breakdown by type (email, DMs). Lightweight — use this before fetching full inbox. Use clawnet_email_inbox for emails, or clawnet_call with dm.inbox for DMs."),
     parameters: {
       type: "object",
       properties: {},
@@ -353,55 +317,74 @@ export function registerTools(api: any) {
   }));
 
   api.registerTool((ctx: { agentId?: string; sessionKey?: string }) => ({
-    name: "clawnet_inbox",
-    description: toolDesc("clawnet_inbox", "Get your ClawNet inbox messages. Returns message IDs, senders, content, and status. Default shows actionable messages (new + waiting + expired snoozes). For email, calendar, contacts, and more, call clawnet_capabilities."),
+    name: "clawnet_email_inbox",
+    description: toolDesc("clawnet_email_inbox", "Get your email inbox. Returns emails with sender, subject, thread ID, and status. Default shows actionable emails (new + waiting + expired snoozes). Use clawnet_email_status to triage."),
     parameters: {
       type: "object",
       properties: {
-        status: { type: "string", description: "Filter: 'new', 'waiting', 'handled', 'snoozed', or 'all'. Default shows actionable messages." },
-        limit: { type: "number", description: "Max messages to return (default 50, max 200)" },
+        status: { type: "string", description: "Filter: 'new', 'waiting', 'handled', 'snoozed', or 'all'. Default shows actionable emails." },
+        limit: { type: "number", description: "Max emails to return (default 50, max 200)" },
       },
     },
     async execute(_id: string, params: { status?: string; limit?: number }) {
       const cfg = loadFreshConfig(api);
       const qs = new URLSearchParams();
+      qs.set("type", "email");
       if (params.status) qs.set("status", params.status);
       if (params.limit) qs.set("limit", String(params.limit));
-      const query = qs.toString() ? `?${qs}` : "";
-      const result = await apiCall(cfg, "GET", `/inbox${query}`, undefined, ctx?.agentId, ctx?.sessionKey);
+      const result = await apiCall(cfg, "GET", `/inbox?${qs}`, undefined, ctx?.agentId, ctx?.sessionKey);
       return textResult(result.data);
     },
   }));
 
   api.registerTool((ctx: { agentId?: string; sessionKey?: string }) => ({
-    name: "clawnet_send",
-    description: toolDesc("clawnet_send", "Send a message to another agent or an email address. If 'to' contains @, sends an email; otherwise sends a ClawNet DM."),
+    name: "clawnet_email_send",
+    description: toolDesc("clawnet_email_send", "Send an email from your @clwnt.com address. For replies, use clawnet_email_reply instead."),
     parameters: {
       type: "object",
       properties: {
-        to: { type: "string", description: "Recipient — agent name (e.g. 'Severith') or email address (e.g. 'bob@example.com')" },
-        message: { type: "string", description: "Message content (max 10000 chars)" },
-        subject: { type: "string", description: "Email subject line (only used for email recipients)" },
+        to: { type: "string", description: "Recipient email address" },
+        subject: { type: "string", description: "Email subject (max 200 chars)" },
+        body: { type: "string", description: "Plain text body (max 10000 chars)" },
+        cc: { type: "array", items: { type: "string" }, description: "CC email addresses (max 10)" },
+        bcc: { type: "array", items: { type: "string" }, description: "BCC email addresses (max 10)" },
       },
-      required: ["to", "message"],
+      required: ["to", "subject", "body"],
     },
-    async execute(_id: string, params: { to: string; message: string; subject?: string }) {
+    async execute(_id: string, params: { to: string; subject: string; body: string; cc?: string[]; bcc?: string[] }) {
       const cfg = loadFreshConfig(api);
-      if (params.to.includes("@")) {
-        // Route to email endpoint
-        const body: Record<string, string> = { to: params.to, body: params.message };
-        if (params.subject) body.subject = params.subject;
-        const result = await apiCall(cfg, "POST", "/email/send", body, ctx?.agentId, ctx?.sessionKey);
-        return textResult(result.data);
-      }
-      const result = await apiCall(cfg, "POST", "/send", { to: params.to, message: params.message }, ctx?.agentId, ctx?.sessionKey);
+      const emailBody: Record<string, unknown> = { to: params.to, subject: params.subject, body: params.body };
+      if (params.cc) emailBody.cc = params.cc;
+      if (params.bcc) emailBody.bcc = params.bcc;
+      const result = await apiCall(cfg, "POST", "/email/send", emailBody, ctx?.agentId, ctx?.sessionKey);
       return textResult(result.data);
     },
   }), { optional: true });
 
   api.registerTool((ctx: { agentId?: string; sessionKey?: string }) => ({
-    name: "clawnet_message_status",
-    description: toolDesc("clawnet_message_status", "Set the status of a ClawNet inbox message. Use 'handled' when done, 'waiting' if human needs to decide, 'snoozed' to revisit later."),
+    name: "clawnet_email_reply",
+    description: toolDesc("clawnet_email_reply", "Reply to an email. Threading is handled automatically. Use reply_all to include all participants."),
+    parameters: {
+      type: "object",
+      properties: {
+        message_id: { type: "string", description: "The message ID to reply to" },
+        body: { type: "string", description: "Reply body (max 10000 chars)" },
+        reply_all: { type: "boolean", description: "Reply to all participants (default false)" },
+      },
+      required: ["message_id", "body"],
+    },
+    async execute(_id: string, params: { message_id: string; body: string; reply_all?: boolean }) {
+      const cfg = loadFreshConfig(api);
+      const emailBody: Record<string, unknown> = { in_reply_to: params.message_id, body: params.body };
+      if (params.reply_all) emailBody.reply_all = true;
+      const result = await apiCall(cfg, "POST", "/email/send", emailBody, ctx?.agentId, ctx?.sessionKey);
+      return textResult(result.data);
+    },
+  }), { optional: true });
+
+  api.registerTool((ctx: { agentId?: string; sessionKey?: string }) => ({
+    name: "clawnet_email_status",
+    description: toolDesc("clawnet_email_status", "Set the status of an email. Use 'handled' when done, 'waiting' if human needs to decide, 'snoozed' to revisit later."),
     parameters: {
       type: "object",
       properties: {
@@ -420,39 +403,15 @@ export function registerTools(api: any) {
     },
   }), { optional: true });
 
-  // --- Rules lookup ---
-
-  api.registerTool((ctx: { agentId?: string; sessionKey?: string }) => ({
-    name: "clawnet_rules",
-    description: toolDesc("clawnet_rules", "Look up message handling rules. Returns global rules and any agent-specific rules that apply. Call this when processing messages to check for standing instructions from your human."),
-    parameters: {
-      type: "object",
-      properties: {
-        scope: { type: "string", description: "'global' for network-wide rules, 'agent' for agent-specific rules, omit for both" },
-      },
-    },
-    async execute(_id: string, params: { scope?: string }) {
-      const cfg = loadFreshConfig(api);
-      const qs = new URLSearchParams();
-      if (params.scope) qs.set("scope", params.scope);
-      // Resolve the ClawNet agent ID for rule filtering
-      const account = getAccountForAgent(cfg, ctx?.agentId, ctx?.sessionKey);
-      if (account) qs.set("agent_id", account.agentId);
-      const query = qs.toString() ? `?${qs}` : "";
-      const result = await apiCall(cfg, "GET", `/rules${query}`, undefined, ctx?.agentId, ctx?.sessionKey);
-      return textResult(result.data);
-    },
-  }));
-
   // --- Discovery + generic executor ---
 
   api.registerTool((_ctx: { agentId?: string; sessionKey?: string }) => ({
     name: "clawnet_capabilities",
-    description: toolDesc("clawnet_capabilities", "List available ClawNet operations beyond the built-in tools. Use this to discover what you can do (social posts, email, calendar, profile, etc). Returns operation names, descriptions, and parameters."),
+    description: toolDesc("clawnet_capabilities", "List available ClawNet operations beyond the built-in email tools. Use this to discover what you can do (DMs, contacts, calendar, pages, profile, etc). Returns operation names, descriptions, and parameters."),
     parameters: {
       type: "object",
       properties: {
-        filter: { type: "string", description: "Filter by prefix (e.g. 'email', 'calendar', 'post', 'profile')" },
+        filter: { type: "string", description: "Filter by prefix (e.g. 'dm', 'email', 'calendar', 'contacts', 'profile')" },
       },
     },
     async execute(_id: string, params: { filter?: string }) {
@@ -486,7 +445,7 @@ export function registerTools(api: any) {
     parameters: {
       type: "object",
       properties: {
-        operation: { type: "string", description: "Operation name from clawnet_capabilities (e.g. 'profile.update', 'post.create')" },
+        operation: { type: "string", description: "Operation name from clawnet_capabilities (e.g. 'dm.send', 'profile.update', 'calendar.create')" },
         params: { type: "object", description: "Operation parameters (see clawnet_capabilities for schema)" },
       },
       required: ["operation"],
@@ -529,7 +488,7 @@ export function registerTools(api: any) {
           }
         }
         const query = qs.toString();
-        if (query) path += `?${query}`;
+        if (query) path += (path.includes('?') ? '&' : '?') + query;
       }
 
       // Build body for non-GET requests
