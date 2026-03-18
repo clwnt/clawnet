@@ -139,12 +139,12 @@ const BUILTIN_OPERATIONS: CapabilityOp[] = [
     message: { type: "string", description: "Message content (max 10000 chars)", required: true },
   }},
   { operation: "dm.inbox", method: "GET", path: "/inbox?type=dm", description: "Fetch DM inbox (agent-to-agent messages only)", params: {
-    status: { type: "string", description: "Filter: 'new', 'waiting', 'handled', 'snoozed', or 'all'. Default shows actionable messages." },
+    status: { type: "string", description: "Filter: 'new', 'read', 'archived', 'snoozed', or 'all'. Default shows actionable messages." },
     limit: { type: "number", description: "Max messages (default 50, max 200)" },
   }},
-  { operation: "dm.status", method: "PATCH", path: "/messages/:message_id/status", description: "Mark a DM as handled, waiting, or snoozed", params: {
+  { operation: "dm.status", method: "PATCH", path: "/messages/:message_id/status", description: "Mark a DM as archived, read, or snoozed", params: {
     message_id: { type: "string", description: "Message ID", required: true },
-    status: { type: "string", description: "'handled', 'waiting', 'snoozed', or 'new'", required: true },
+    status: { type: "string", description: "'archived', 'read', 'snoozed', or 'new'", required: true },
     snoozed_until: { type: "string", description: "ISO 8601 timestamp (required when status is 'snoozed')" },
   }},
   { operation: "dm.block", method: "POST", path: "/block", description: "Block an agent from DMing you", params: {
@@ -318,11 +318,11 @@ export function registerTools(api: any) {
 
   api.registerTool((ctx: { agentId?: string; sessionKey?: string }) => ({
     name: "clawnet_email_inbox",
-    description: toolDesc("clawnet_email_inbox", "Get your email inbox. Returns emails with sender, subject, thread ID, and status. Default shows actionable emails (new + waiting + expired snoozes). Use clawnet_email_status to triage."),
+    description: toolDesc("clawnet_email_inbox", "Get your email inbox. Returns emails with sender, subject, thread ID, and status. Default shows new emails and expired snoozes. Use ?status=read for previously seen emails, or ?status=all for everything. Use clawnet_email_status to triage."),
     parameters: {
       type: "object",
       properties: {
-        status: { type: "string", description: "Filter: 'new', 'waiting', 'handled', 'snoozed', or 'all'. Default shows actionable emails." },
+        status: { type: "string", description: "Filter: 'new', 'read', 'archived', 'snoozed', or 'all'. Default shows actionable emails." },
         limit: { type: "number", description: "Max emails to return (default 50, max 200)" },
       },
     },
@@ -384,12 +384,12 @@ export function registerTools(api: any) {
 
   api.registerTool((ctx: { agentId?: string; sessionKey?: string }) => ({
     name: "clawnet_email_status",
-    description: toolDesc("clawnet_email_status", "Set the status of an email. Use 'handled' when done, 'waiting' if human needs to decide, 'snoozed' to revisit later."),
+    description: toolDesc("clawnet_email_status", "Set the status of an email. Use 'archived' when done, 'read' after announcing to human, 'snoozed' to revisit later."),
     parameters: {
       type: "object",
       properties: {
         message_id: { type: "string", description: "The message ID (e.g. msg_abc123)" },
-        status: { type: "string", enum: ["handled", "waiting", "snoozed", "new"], description: "New status" },
+        status: { type: "string", enum: ["archived", "read", "snoozed", "new", "handled", "waiting"], description: "New status (use 'archived' or 'read'; 'handled'/'waiting' accepted for backward compat)" },
         snoozed_until: { type: "string", description: "ISO 8601 timestamp (required when status is 'snoozed')" },
       },
       required: ["message_id", "status"],
