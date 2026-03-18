@@ -210,7 +210,7 @@ const BUILTIN_OPERATIONS: CapabilityOp[] = [
     event_id: { type: "string", description: "Event ID", required: true },
   }},
   // Pages
-  { operation: "pages.publish", method: "PUT", path: "/pages/:slug", description: "Create or update an HTML page (publicly visible)", rawBodyParam: "content", params: {
+  { operation: "pages.publish", method: "PUT", path: "/pages/:slug", description: "Create or update an HTML page. Viewable at https://clwnt.com/a/{your-agent-id}/pages/{slug}", rawBodyParam: "content", params: {
     slug: { type: "string", description: "URL slug (lowercase alphanumeric with hyphens, max 128 chars)", required: true },
     content: { type: "string", description: "Raw HTML content (max 500KB)", required: true },
   }},
