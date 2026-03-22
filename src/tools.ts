@@ -106,6 +106,38 @@ function textResult(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
 }
 
+// --- A2A JSON-RPC helpers ---
+
+async function a2aCall(
+  cfg: ClawnetConfig,
+  path: string,
+  method: string,
+  params?: Record<string, unknown>,
+  openclawAgentId?: string,
+  sessionKey?: string,
+): Promise<{ ok: boolean; data: any }> {
+  const account = getAccountForAgent(cfg, openclawAgentId, sessionKey);
+  if (!account) {
+    return { ok: false, data: { error: "no_account", message: "No ClawNet account configured." } };
+  }
+  const body = {
+    jsonrpc: "2.0",
+    id: `plugin-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    method,
+    ...(params ? { params } : {}),
+  };
+  const res = await fetch(`${cfg.baseUrl}${path}`, {
+    method: "POST",
+    headers: authHeaders(account.resolvedToken),
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (data.error) {
+    return { ok: false, data: data.error };
+  }
+  return { ok: true, data: data.result ?? data };
+}
+
 // --- Capabilities registry ---
 
 interface CapabilityOp {
@@ -133,19 +165,10 @@ const BUILTIN_OPERATIONS: CapabilityOp[] = [
   { operation: "email.allowlist.remove", method: "DELETE", path: "/email/allowlist", description: "Remove sender from email allowlist", params: {
     pattern: { type: "string", description: "Email address or pattern to remove", required: true },
   }},
-  // DMs
-  { operation: "dm.send", method: "POST", path: "/send", description: "Send a DM to another ClawNet agent", params: {
+  // DMs (legacy — kept for backward compat during transition)
+  { operation: "dm.send", method: "POST", path: "/send", description: "[Legacy] Send a DM to another ClawNet agent. Prefer a2a.send for new messages.", params: {
     to: { type: "string", description: "Recipient agent name", required: true },
     message: { type: "string", description: "Message content (max 10000 chars)", required: true },
-  }},
-  { operation: "dm.inbox", method: "GET", path: "/inbox?type=dm", description: "Fetch DM inbox (agent-to-agent messages only)", params: {
-    status: { type: "string", description: "Filter: 'new', 'read', 'archived', 'snoozed', or 'all'. Default shows actionable messages." },
-    limit: { type: "number", description: "Max messages (default 50, max 200)" },
-  }},
-  { operation: "dm.status", method: "PATCH", path: "/messages/:message_id/status", description: "Mark a DM as archived, read, or snoozed", params: {
-    message_id: { type: "string", description: "Message ID", required: true },
-    status: { type: "string", description: "'archived', 'read', 'snoozed', or 'new'", required: true },
-    snoozed_until: { type: "string", description: "ISO 8601 timestamp (required when status is 'snoozed')" },
   }},
   { operation: "dm.block", method: "POST", path: "/block", description: "Block an agent from DMing you", params: {
     agent_id: { type: "string", description: "Agent to block", required: true },
@@ -402,6 +425,81 @@ export function registerTools(api: any) {
       return textResult(result.data);
     },
   }), { optional: true });
+
+  // --- A2A DM tools ---
+
+  api.registerTool((ctx: { agentId?: string; sessionKey?: string }) => ({
+    name: "clawnet_task_send",
+    description: toolDesc("clawnet_task_send", "Send a task to another ClawNet agent. Use this when you need something from another agent — a question answered, an action performed, information looked up. Returns a task ID to check for their response later. For fire-and-forget notifications, use email instead."),
+    parameters: {
+      type: "object",
+      properties: {
+        to: { type: "string", description: "Recipient agent name" },
+        message: { type: "string", description: "Message content" },
+        task_id: { type: "string", description: "If following up on a task (after agent asked for input), provide the task ID" },
+      },
+      required: ["to", "message"],
+    },
+    async execute(_id: string, params: { to: string; message: string; task_id?: string }) {
+      const cfg = loadFreshConfig(api);
+      const a2aParams: Record<string, unknown> = {
+        message: { role: "user", parts: [{ kind: "text", text: params.message }] },
+      };
+      if (params.task_id) {
+        a2aParams.taskId = params.task_id;
+      }
+      const result = await a2aCall(cfg, `/a2a/${encodeURIComponent(params.to)}`, "message/send", a2aParams, ctx?.agentId, ctx?.sessionKey);
+      return textResult(result.data);
+    },
+  }));
+
+  api.registerTool((ctx: { agentId?: string; sessionKey?: string }) => ({
+    name: "clawnet_task_inbox",
+    description: toolDesc("clawnet_task_inbox", "Get pending tasks from other agents. Returns tasks with sender info, trust tier, message history, and contact context. Use clawnet_task_respond to respond."),
+    parameters: {
+      type: "object",
+      properties: {
+        status: { type: "string", description: "Filter: 'submitted' (default), 'working', 'completed', 'failed', or 'all'" },
+        limit: { type: "number", description: "Max tasks (default 50, max 100)" },
+      },
+    },
+    async execute(_id: string, params: { status?: string; limit?: number }) {
+      const cfg = loadFreshConfig(api);
+      const a2aParams: Record<string, unknown> = {};
+      if (params.status) a2aParams.status = params.status;
+      if (params.limit) a2aParams.limit = params.limit;
+      const result = await a2aCall(cfg, "/a2a", "tasks/list", a2aParams, ctx?.agentId, ctx?.sessionKey);
+      return textResult(result.data);
+    },
+  }));
+
+  api.registerTool((ctx: { agentId?: string; sessionKey?: string }) => ({
+    name: "clawnet_task_respond",
+    description: toolDesc("clawnet_task_respond", "Respond to a task from another agent. Set state to 'completed' with your response, 'input-required' to ask for more info, 'working' to acknowledge, or 'failed' if you can't do it."),
+    parameters: {
+      type: "object",
+      properties: {
+        task_id: { type: "string", description: "Task ID to respond to" },
+        state: { type: "string", enum: ["completed", "input-required", "working", "failed"], description: "New task state" },
+        message: { type: "string", description: "Response text (required for completed, input-required, and failed)" },
+      },
+      required: ["task_id", "state"],
+    },
+    async execute(_id: string, params: { task_id: string; state: string; message?: string }) {
+      const cfg = loadFreshConfig(api);
+      const a2aParams: Record<string, unknown> = {
+        id: params.task_id,
+        state: params.state,
+      };
+      if (params.state === "completed" && params.message) {
+        a2aParams.artifacts = [{ parts: [{ kind: "text", text: params.message }] }];
+      } else if ((params.state === "input-required" || params.state === "failed") && params.message) {
+        a2aParams.message = { role: "agent", parts: [{ kind: "text", text: params.message }] };
+      }
+      const result = await a2aCall(cfg, "/a2a", "tasks/respond", a2aParams, ctx?.agentId, ctx?.sessionKey);
+      return textResult(result.data);
+    },
+  }));
 
   // --- Discovery + generic executor ---
 

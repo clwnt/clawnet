@@ -72,7 +72,7 @@ async function reloadOnboardingMessage(): Promise<void> {
 
 const SKILL_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 const SKILL_FILES = ["skill.json", "api-reference.md", "inbox-handler.md", "capabilities.json", "hook-template.txt", "tool-descriptions.json", "onboarding-message.txt"];
-export const PLUGIN_VERSION = "0.6.1"; // Reported to server via PATCH /me every 6h
+export const PLUGIN_VERSION = "0.7.0"; // Reported to server via PATCH /me every 6h
 
 // --- Service ---
 
@@ -282,11 +282,11 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
 
   // --- Poll ---
 
-  async function pollAccount(account: ClawnetAccount) {
+  async function pollAccount(account: ClawnetAccount): Promise<number> {
     const resolvedToken = resolveToken(account.token);
     if (!resolvedToken) {
       api.logger.warn(`[clawnet] No token resolved for account "${account.id}", skipping`);
-      return;
+      return 0;
     }
 
     const headers = {
@@ -301,6 +301,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
     }
     const checkData = (await checkRes.json()) as {
       count: number;
+      a2a_dm_count?: number;
       plugin_config?: {
         poll_seconds: number;
         debounce_seconds: number;
@@ -334,10 +335,12 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
       }
     }
 
+    const a2aDmCount = checkData.a2a_dm_count ?? 0;
+
     if (checkData.count === 0) {
-      // Inbox clear — release any delivery lock (agent finished processing)
+      // Email inbox clear — release any delivery lock (agent finished processing)
       deliveryLock.delete(account.id);
-      return;
+      return a2aDmCount;
     }
 
     // Skip if a recent webhook delivery is still being processed by the LLM.
@@ -345,7 +348,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
     const lockUntil = deliveryLock.get(account.id);
     if (lockUntil && new Date() < lockUntil) {
       api.logger.debug?.(`[clawnet] ${account.id}: ${checkData.count} message(s) waiting (delivery lock active, skipping)`);
-      return;
+      return a2aDmCount;
     }
 
     state.lastInboxNonEmptyAt = new Date();
@@ -358,7 +361,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
     }
     const inboxData = (await inboxRes.json()) as { messages: Array<Record<string, any>> };
 
-    if (inboxData.messages.length === 0) return;
+    if (inboxData.messages.length === 0) return a2aDmCount;
 
     // Normalize API field names: API returns "from", plugin uses "from_agent"
     const normalized: InboxMessage[] = inboxData.messages.map((m) => ({
@@ -375,6 +378,90 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
     const existing = pendingMessages.get(account.id) ?? [];
     pendingMessages.set(account.id, [...existing, ...normalized]);
     scheduleFlush(account.id, account.agentId);
+
+    return a2aDmCount;
+  }
+
+  async function pollAccountA2A(account: ClawnetAccount, a2aDmCount: number) {
+    if (a2aDmCount === 0) return;
+
+    const resolvedToken = resolveToken(account.token);
+    if (!resolvedToken) return;
+
+    // Skip if delivery lock active
+    const lockUntil = deliveryLock.get(account.id);
+    if (lockUntil && new Date() < lockUntil) {
+      api.logger.debug?.(`[clawnet] ${account.id}: ${a2aDmCount} A2A task(s) waiting (delivery lock active, skipping)`);
+      return;
+    }
+
+    // Fetch tasks via JSON-RPC
+    const body = {
+      jsonrpc: "2.0",
+      id: `poll-${Date.now()}`,
+      method: "tasks/list",
+      params: { status: "submitted", limit: 50 },
+    };
+    const res = await fetch(`${cfg.baseUrl}/a2a`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${resolvedToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      throw new Error(`A2A tasks/list returned ${res.status}`);
+    }
+    const data = (await res.json()) as {
+      result?: { tasks: Array<Record<string, any>> };
+    };
+    const tasks = data.result?.tasks ?? [];
+    if (tasks.length === 0) return;
+
+    api.logger.info(`[clawnet] ${account.id}: ${tasks.length} A2A task(s) to deliver`);
+
+    // Convert A2A tasks to the message format the hook expects
+    const messages: InboxMessage[] = tasks.map((task) => {
+      const history = task.history as Array<{ role: string; parts: Array<{ text?: string }> }> ?? [];
+      const lastMsg = history[history.length - 1];
+      const text = lastMsg?.parts?.map((p: any) => p.text).filter(Boolean).join("\n") ?? "";
+      const contactInfo = task.contact ? ` [${task.trustTier ?? "public"}]` : "";
+      return {
+        id: task.id,
+        from_agent: task.from,
+        content: `[A2A Task ${task.id}]${contactInfo}\n${text}`,
+        created_at: (task.status as any)?.timestamp ?? new Date().toISOString(),
+      };
+    });
+
+    state.counters.messagesSeen += messages.length;
+    const pendingKey = `${account.id}:a2a`;
+    const existingA2A = pendingMessages.get(pendingKey) ?? [];
+    pendingMessages.set(pendingKey, [...existingA2A, ...messages]);
+    scheduleFlush(pendingKey, account.agentId);
+
+    // Mark delivered tasks as 'working' so they don't get re-delivered on next poll.
+    // This is the equivalent of marking emails 'read' — acknowledges receipt.
+    for (const task of tasks) {
+      try {
+        await fetch(`${cfg.baseUrl}/a2a`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${resolvedToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: `ack-${task.id}`,
+            method: "tasks/respond",
+            params: { id: task.id, state: "working" },
+          }),
+        });
+      } catch {
+        // Non-fatal — task may get re-delivered next cycle
+      }
+    }
   }
 
   async function tick() {
@@ -421,7 +508,16 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
     let hadError = false;
     for (const account of enabledAccounts) {
       try {
-        await pollAccount(account);
+        const a2aDmCount = await pollAccount(account);
+
+        // Also poll for A2A DMs if any pending
+        if (a2aDmCount > 0) {
+          try {
+            await pollAccountA2A(account, a2aDmCount);
+          } catch (a2aErr: any) {
+            api.logger.error(`[clawnet] A2A poll error for ${account.id}: ${a2aErr.message}`);
+          }
+        }
       } catch (err: any) {
         hadError = true;
         state.lastError = { message: err.message, at: new Date() };
