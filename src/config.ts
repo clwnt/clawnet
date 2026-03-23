@@ -83,11 +83,12 @@ function parseAccount(raw: unknown): ClawnetAccount | null {
 
 /**
  * Resolve a token value — handles "${ENV_VAR}" references.
+ * Returns empty string if the env var is not set or blank.
  */
 export function resolveToken(token: string): string {
   const match = token.match(/^\$\{(.+)\}$/);
   if (match) {
-    return process.env[match[1]] || "";
+    return process.env[match[1]]?.trim() || "";
   }
-  return token;
+  return token.trim();
 }

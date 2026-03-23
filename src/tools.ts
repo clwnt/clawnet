@@ -51,6 +51,14 @@ function authHeaders(token: string) {
   };
 }
 
+function noAccountError(cfg: ClawnetConfig): { error: string; message: string } {
+  const unresolvedAccount = cfg.accounts.find((a) => a.enabled && !resolveToken(a.token));
+  if (unresolvedAccount) {
+    return { error: "token_unresolved", message: `ClawNet account '${unresolvedAccount.id}' found but token did not resolve. If using \${ENV_VAR}, ensure the variable is set in your environment.` };
+  }
+  return { error: "no_account", message: "No ClawNet account configured. Run: openclaw clawnet setup" };
+}
+
 async function apiCall(
   cfg: ClawnetConfig,
   method: string,
@@ -61,7 +69,7 @@ async function apiCall(
 ): Promise<{ ok: boolean; status: number; data: any }> {
   const account = getAccountForAgent(cfg, openclawAgentId, sessionKey);
   if (!account) {
-    return { ok: false, status: 0, data: { error: "no_account", message: "No ClawNet account configured. Run: openclaw clawnet setup" } };
+    return { ok: false, status: 0, data: noAccountError(cfg) };
   }
   const res = await fetch(`${cfg.baseUrl}${path}`, {
     method,
@@ -85,7 +93,7 @@ async function apiCallRaw(
 ): Promise<{ ok: boolean; status: number; data: any }> {
   const account = getAccountForAgent(cfg, openclawAgentId, sessionKey);
   if (!account) {
-    return { ok: false, status: 0, data: { error: "no_account", message: "No ClawNet account configured. Run: openclaw clawnet setup" } };
+    return { ok: false, status: 0, data: noAccountError(cfg) };
   }
   const res = await fetch(`${cfg.baseUrl}${path}`, {
     method,
@@ -118,7 +126,7 @@ async function a2aCall(
 ): Promise<{ ok: boolean; data: any }> {
   const account = getAccountForAgent(cfg, openclawAgentId, sessionKey);
   if (!account) {
-    return { ok: false, data: { error: "no_account", message: "No ClawNet account configured." } };
+    return { ok: false, data: noAccountError(cfg) };
   }
   const body = {
     jsonrpc: "2.0",
@@ -426,6 +434,73 @@ export function registerTools(api: any) {
     },
   }), { optional: true });
 
+  api.registerTool((ctx: { agentId?: string; sessionKey?: string }) => ({
+    name: "clawnet_inbox_session",
+    description: toolDesc("clawnet_inbox_session", "Start an interactive email inbox session. Returns your emails with assigned numbers and a triage protocol for presenting them to your human. Use this when your human asks to manage, check, or go through their email."),
+    parameters: {
+      type: "object",
+      properties: {
+        status: { type: "string", description: "Filter: 'new' or 'read'. Omit for active inbox (new + read + expired snoozes)." },
+        limit: { type: "number", description: "Max emails to return (default 50, max 200)" },
+      },
+    },
+    async execute(_id: string, params: { status?: string; limit?: number }) {
+      const cfg = loadFreshConfig(api);
+
+      // Fetch protocol from cached skill file
+      let protocol = "";
+      try {
+        const { homedir } = await import("node:os");
+        const { readFile } = await import("node:fs/promises");
+        const { join } = await import("node:path");
+        const filePath = join(homedir(), ".openclaw", "plugins", "clawnet", "docs", "inbox-protocol.md");
+        protocol = await readFile(filePath, "utf-8");
+      } catch {
+        // Fallback if file not cached yet
+        protocol = "Present emails as a numbered list. Your human will give instructions by number (e.g. '1 archive', '2 reply yes'). Check workspace rules and present rule-matched actions as a batch first.";
+      }
+
+      // Fetch inbox
+      const qs = new URLSearchParams();
+      qs.set("type", "email");
+      if (params.status) qs.set("status", params.status);
+      if (params.limit) qs.set("limit", String(params.limit));
+      const result = await apiCall(cfg, "GET", `/inbox?${qs}`, undefined, ctx?.agentId, ctx?.sessionKey);
+
+      if (!result.ok) {
+        return textResult(result.data);
+      }
+
+      const messages: Array<Record<string, unknown>> = (result.data as any)?.messages ?? [];
+
+      // Assign sequential numbers and build response
+      let newCount = 0;
+      let readCount = 0;
+      const emails = messages.map((m, i) => {
+        const status = String(m.status ?? "");
+        if (status === "new") newCount++;
+        else if (status === "read") readCount++;
+        return {
+          n: i + 1,
+          id: m.id,
+          from: m.from,
+          subject: (m.email as any)?.subject ?? null,
+          received_at: m.created_at,
+          status: m.status,
+          snippet: typeof m.content === "string" ? m.content.slice(0, 200) : null,
+          thread_id: (m.email as any)?.thread_id ?? null,
+          thread_count: (m.email as any)?.thread_count ?? null,
+        };
+      });
+
+      return textResult({
+        protocol,
+        emails,
+        counts: { total: emails.length, new: newCount, read: readCount },
+      });
+    },
+  }));
+
   // --- A2A DM tools ---
 
   api.registerTool((ctx: { agentId?: string; sessionKey?: string }) => ({
@@ -449,6 +524,25 @@ export function registerTools(api: any) {
         a2aParams.taskId = params.task_id;
       }
       const result = await a2aCall(cfg, `/a2a/${encodeURIComponent(params.to)}`, "message/send", a2aParams, ctx?.agentId, ctx?.sessionKey);
+      return textResult(result.data);
+    },
+  }));
+
+  api.registerTool((ctx: { agentId?: string; sessionKey?: string }) => ({
+    name: "clawnet_task_get",
+    description: toolDesc("clawnet_task_get", "Check the status of a task you sent. Returns current state, artifacts (if completed), and metadata. Use the task ID from clawnet_task_send."),
+    parameters: {
+      type: "object",
+      properties: {
+        task_id: { type: "string", description: "Task ID to look up" },
+      },
+      required: ["task_id"],
+    },
+    async execute(_id: string, params: { task_id: string }) {
+      const cfg = loadFreshConfig(api);
+      const account = getAccountForAgent(cfg, ctx?.agentId, ctx?.sessionKey);
+      if (!account) return textResult(noAccountError(cfg));
+      const result = await a2aCall(cfg, `/a2a/${encodeURIComponent(account.agentId)}`, "tasks/get", { id: params.task_id }, ctx?.agentId, ctx?.sessionKey);
       return textResult(result.data);
     },
   }));

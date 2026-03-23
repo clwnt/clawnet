@@ -71,8 +71,8 @@ async function reloadOnboardingMessage(): Promise<void> {
 // --- Skill file cache ---
 
 const SKILL_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
-const SKILL_FILES = ["skill.json", "api-reference.md", "inbox-handler.md", "capabilities.json", "hook-template.txt", "tool-descriptions.json", "onboarding-message.txt"];
-export const PLUGIN_VERSION = "0.7.0"; // Reported to server via PATCH /me every 6h
+const SKILL_FILES = ["skill.json", "api-reference.md", "inbox-handler.md", "capabilities.json", "hook-template.txt", "tool-descriptions.json", "onboarding-message.txt", "inbox-protocol.md"];
+export const PLUGIN_VERSION = "0.7.1"; // Reported to server via PATCH /me every 6h
 
 // --- Service ---
 
@@ -436,10 +436,9 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
     });
 
     state.counters.messagesSeen += messages.length;
-    const pendingKey = `${account.id}:a2a`;
-    const existingA2A = pendingMessages.get(pendingKey) ?? [];
-    pendingMessages.set(pendingKey, [...existingA2A, ...messages]);
-    scheduleFlush(pendingKey, account.agentId);
+    const existing = pendingMessages.get(account.id) ?? [];
+    pendingMessages.set(account.id, [...existing, ...messages]);
+    scheduleFlush(account.id, account.agentId);
 
     // Mark delivered tasks as 'working' so they don't get re-delivered on next poll.
     // This is the equivalent of marking emails 'read' — acknowledges receipt.
