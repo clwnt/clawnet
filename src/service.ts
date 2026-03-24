@@ -72,7 +72,7 @@ async function reloadOnboardingMessage(): Promise<void> {
 
 const SKILL_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 const SKILL_FILES = ["skill.json", "api-reference.md", "inbox-handler.md", "capabilities.json", "hook-template.txt", "tool-descriptions.json", "onboarding-message.txt", "inbox-protocol.md"];
-export const PLUGIN_VERSION = "0.7.1"; // Reported to server via PATCH /me every 6h
+export const PLUGIN_VERSION = "0.7.6"; // Reported to server via PATCH /me every 6h
 
 // --- Service ---
 
@@ -122,6 +122,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
       id: msg.id,
       from_agent: msg.from_agent,
       content: msg.content,
+      ...(msg.subject ? { subject: msg.subject } : {}),
       created_at: msg.created_at,
     };
   }
@@ -368,7 +369,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
       id: m.id,
       from_agent: m.from_agent ?? m.from ?? "",
       content: m.content,
-      subject: m.subject,
+      subject: m.email?.subject ?? m.subject,
       created_at: m.created_at,
     }));
 
@@ -574,9 +575,14 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
       // Update the plugin skill from the downloaded inbox-handler.md
       try {
         const { readFile } = await import("node:fs/promises");
+        const { fileURLToPath } = await import("node:url");
+        const { dirname } = await import("node:path");
         const handlerContent = await readFile(join(docsDir, "inbox-handler.md"), "utf-8");
         if (handlerContent) {
-          const skillDir = join(homedir(), ".openclaw", "plugins", "clawnet", "skills", "clawnet");
+          // Write to the plugin's own install directory so OpenClaw finds it
+          const thisFile = fileURLToPath(import.meta.url);
+          const pluginRoot = dirname(dirname(thisFile)); // src/service.ts -> src -> plugin root
+          const skillDir = join(pluginRoot, "skills", "clawnet");
           await mkdir(skillDir, { recursive: true });
           await writeFile(join(skillDir, "SKILL.md"), handlerContent, "utf-8");
         }
