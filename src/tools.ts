@@ -222,8 +222,10 @@ const BUILTIN_OPERATIONS: CapabilityOp[] = [
     title: { type: "string", description: "Event title", required: true },
     starts_at: { type: "string", description: "ISO 8601 start time", required: true },
     ends_at: { type: "string", description: "ISO 8601 end time" },
+    all_day: { type: "boolean", description: "Mark as all-day event (spans full calendar day)" },
     location: { type: "string", description: "Event location" },
     description: { type: "string", description: "Event description" },
+    remind_minutes: { type: "number", description: "Minutes before event to send notification (0-10080, default 15, null to disable)" },
     attendees: { type: "array", description: "Array of {email, name?} — each gets a .ics invite" },
   }},
   { operation: "calendar.list", method: "GET", path: "/calendar/events", description: "List calendar events", params: {
@@ -235,7 +237,11 @@ const BUILTIN_OPERATIONS: CapabilityOp[] = [
     event_id: { type: "string", description: "Event ID", required: true },
     title: { type: "string", description: "New title" },
     starts_at: { type: "string", description: "New start time" },
+    ends_at: { type: "string", description: "New end time" },
+    all_day: { type: "boolean", description: "Mark as all-day event" },
     location: { type: "string", description: "New location" },
+    description: { type: "string", description: "New description" },
+    remind_minutes: { type: "number", description: "Minutes before event to send notification (0-10080, null to disable)" },
   }},
   { operation: "calendar.delete", method: "DELETE", path: "/calendar/events/:event_id", description: "Delete event (sends cancellation to attendees)", params: {
     event_id: { type: "string", description: "Event ID", required: true },
