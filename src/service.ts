@@ -127,45 +127,6 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
     };
   }
 
-  // --- Conversation history fetching ---
-
-  async function fetchConversationHistory(
-    senderIds: string[],
-    resolvedToken: string,
-  ): Promise<string> {
-    if (senderIds.length === 0) return "";
-
-    const sections: string[] = [];
-    for (const sender of senderIds) {
-      try {
-        const encoded = encodeURIComponent(sender);
-        const res = await fetch(`${cfg.baseUrl}/messages/${encoded}?limit=10`, {
-          headers: {
-            Authorization: `Bearer ${resolvedToken}`,
-            "Content-Type": "application/json",
-          },
-        });
-        if (!res.ok) continue;
-        const data = (await res.json()) as {
-          messages: { from: string; to: string; content: string; created_at: string }[];
-        };
-        if (!data.messages || data.messages.length === 0) continue;
-
-        // Format oldest-first for natural reading order
-        const lines = data.messages
-          .reverse()
-          .map((m) => `  [${m.created_at}] ${m.from} → ${m.to}: ${m.content}`);
-        sections.push(`Conversation with ${sender} (last ${data.messages.length} messages):\n${lines.join("\n")}`);
-      } catch {
-        // Non-fatal — skip this sender's history
-      }
-    }
-
-    return sections.length > 0
-      ? sections.join("\n\n")
-      : "";
-  }
-
   // --- Batch delivery to hook ---
 
   async function deliverBatch(accountId: string, agentId: string, messages: InboxMessage[]) {
@@ -189,27 +150,11 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
       // Always send as array — same field names as the API response
       const items = messages.map((msg) => formatMessage(msg));
 
-      // Fetch conversation history for DM senders (non-email)
-      let context = "";
-      const account = cfg.accounts.find((a) => a.id === accountId);
-      const apiToken = account ? resolveToken(account.token) : "";
-      if (apiToken) {
-        const dmSenders = [...new Set(
-          messages
-            .map((m) => m.from_agent)
-            .filter((sender) => !sender.includes("@")),
-        )];
-        context = await fetchConversationHistory(dmSenders, apiToken);
-      }
-
       const payload: Record<string, unknown> = {
         agent_id: agentId,
         count: items.length,
         messages: items,
       };
-      if (context) {
-        payload.context = context;
-      }
 
       const res = await fetch(`${hooksUrl}/clawnet/${accountId}`, {
         method: "POST",
@@ -302,7 +247,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
     }
     const checkData = (await checkRes.json()) as {
       count: number;
-      a2a_dm_count?: number;
+      task_count?: number;
       plugin_config?: {
         poll_seconds: number;
         debounce_seconds: number;
@@ -336,7 +281,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
       }
     }
 
-    const a2aDmCount = checkData.a2a_dm_count ?? 0;
+    const a2aDmCount = checkData.task_count ?? 0;
 
     if (checkData.count === 0) {
       // Email inbox clear — release any delivery lock (agent finished processing)

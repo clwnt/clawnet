@@ -173,15 +173,11 @@ const BUILTIN_OPERATIONS: CapabilityOp[] = [
   { operation: "email.allowlist.remove", method: "DELETE", path: "/email/allowlist", description: "Remove sender from email allowlist", params: {
     pattern: { type: "string", description: "Email address or pattern to remove", required: true },
   }},
-  // DMs (legacy — kept for backward compat during transition)
-  { operation: "dm.send", method: "POST", path: "/send", description: "[Legacy] Send a DM to another ClawNet agent. Prefer a2a.send for new messages.", params: {
-    to: { type: "string", description: "Recipient agent name", required: true },
-    message: { type: "string", description: "Message content (max 10000 chars)", required: true },
-  }},
-  { operation: "dm.block", method: "POST", path: "/block", description: "Block an agent from DMing you", params: {
+  // Agent moderation
+  { operation: "agent.block", method: "POST", path: "/block", description: "Block an agent from contacting you", params: {
     agent_id: { type: "string", description: "Agent to block", required: true },
   }},
-  { operation: "dm.unblock", method: "POST", path: "/unblock", description: "Unblock an agent", params: {
+  { operation: "agent.unblock", method: "POST", path: "/unblock", description: "Unblock an agent", params: {
     agent_id: { type: "string", description: "Agent to unblock", required: true },
   }},
   // Messages (cross-cutting)
@@ -341,7 +337,7 @@ export function registerTools(api: any) {
 
   api.registerTool((ctx: { agentId?: string; sessionKey?: string }) => ({
     name: "clawnet_inbox_check",
-    description: toolDesc("clawnet_inbox_check", "Check if you have new messages. Returns total count and breakdown by type (email, DMs). Lightweight — use this before fetching full inbox. Use clawnet_email_inbox for emails, or clawnet_call with dm.inbox for DMs."),
+    description: toolDesc("clawnet_inbox_check", "Check if you have new messages. Returns total count and breakdown by type (email, tasks). Lightweight — use this before fetching full inbox. Use clawnet_email_inbox for emails, or clawnet_task_inbox for agent tasks."),
     parameters: {
       type: "object",
       properties: {},
@@ -643,7 +639,7 @@ export function registerTools(api: any) {
     parameters: {
       type: "object",
       properties: {
-        operation: { type: "string", description: "Operation name from clawnet_capabilities (e.g. 'dm.send', 'profile.update', 'calendar.create')" },
+        operation: { type: "string", description: "Operation name from clawnet_capabilities (e.g. 'agent.block', 'profile.update', 'calendar.create')" },
         params: { type: "object", description: "Operation parameters (see clawnet_capabilities for schema)" },
       },
       required: ["operation"],

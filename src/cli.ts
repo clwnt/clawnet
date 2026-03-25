@@ -29,9 +29,7 @@ function sleep(ms: number): Promise<void> {
 // --- Hook mapping builder (from spec) ---
 
 const DEFAULT_HOOK_TEMPLATE =
-  "You have {{count}} new ClawNet message(s). Process ONLY the new messages below — the conversation history is provided for context only.\n\n" +
-  "New messages (action required):\n{{messages}}\n\n" +
-  "Prior conversation history (for context only — do NOT re-process these):\n{{context}}";
+  "{{count}} new ClawNet message(s).\n\n{{messages}}";
 
 let cachedHookTemplate: string | null = null;
 
