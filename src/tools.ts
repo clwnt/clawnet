@@ -438,7 +438,7 @@ export function registerTools(api: any) {
 
   api.registerTool((ctx: { agentId?: string; sessionKey?: string }) => ({
     name: "clawnet_inbox_session",
-    description: toolDesc("clawnet_inbox_session", "Start an interactive email inbox session. Returns your emails with assigned numbers and a triage protocol for presenting them to your human. Use this when your human asks to manage, check, or go through their email."),
+    description: toolDesc("clawnet_inbox_session", "Start an interactive inbox session. Returns your emails with assigned numbers and a triage protocol. IMPORTANT: After calling this tool, also call clawnet_task_inbox to get pending agent tasks — present both emails and tasks together to your human."),
     parameters: {
       type: "object",
       properties: {
@@ -495,10 +495,40 @@ export function registerTools(api: any) {
         };
       });
 
+      // Fetch A2A tasks via REST-style POST to /a2a
+      let tasks: Array<Record<string, unknown>> = [];
+      try {
+        const taskResult = await apiCall(cfg, "POST", "/a2a", {
+          jsonrpc: "2.0",
+          id: `inbox-${Date.now()}`,
+          method: "tasks/list",
+          params: { status: "submitted,working" },
+        }, ctx?.agentId, ctx?.sessionKey);
+        const taskData = taskResult.data as any;
+        const rawTasks = taskData?.result?.tasks ?? taskData?.tasks ?? [];
+        tasks = rawTasks.map((t: any, i: number) => {
+          const lastMsg = (t.history ?? []).slice(-1)[0];
+          const text = lastMsg?.parts?.map((p: any) => p.text).filter(Boolean).join("\n") ?? "";
+          return {
+            n: emails.length + i + 1,
+            id: t.id,
+            type: "a2a_task",
+            from: t.from,
+            trust_tier: t.trustTier ?? "public",
+            content: text.slice(0, 200),
+            state: t.status?.state ?? "unknown",
+            received_at: t.status?.timestamp,
+          };
+        });
+      } catch {
+        // Non-fatal — show emails even if task fetch fails
+      }
+
       return textResult({
         protocol,
         emails,
-        counts: { total: emails.length, new: newCount, read: readCount },
+        tasks,
+        counts: { total: emails.length + tasks.length, emails: emails.length, tasks: tasks.length, new: newCount, read: readCount },
       });
     },
   }));
@@ -555,14 +585,19 @@ export function registerTools(api: any) {
     parameters: {
       type: "object",
       properties: {
-        status: { type: "string", description: "Filter: 'submitted' (default), 'working', 'completed', 'failed', or 'all'" },
+        status: { type: "string", description: "Filter: 'pending' (default — shows submitted + working), 'submitted', 'working', 'completed', 'failed', or 'all'" },
         limit: { type: "number", description: "Max tasks (default 50, max 100)" },
       },
     },
     async execute(_id: string, params: { status?: string; limit?: number }) {
       const cfg = loadFreshConfig(api);
-      const a2aParams: Record<string, unknown> = {};
-      if (params.status) a2aParams.status = params.status;
+      const a2aParams: Record<string, unknown> = { role: "recipient" };
+      const statusFilter = params.status || "pending";
+      if (statusFilter === "pending") {
+        a2aParams.status = "submitted,working";
+      } else {
+        a2aParams.status = statusFilter;
+      }
       if (params.limit) a2aParams.limit = params.limit;
       const result = await a2aCall(cfg, "/a2a", "tasks/list", a2aParams, ctx?.agentId, ctx?.sessionKey);
       return textResult(result.data);
