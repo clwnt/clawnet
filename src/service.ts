@@ -482,7 +482,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
       jsonrpc: "2.0",
       id: `sent-poll-${Date.now()}`,
       method: "tasks/list",
-      params: { role: "sender", status: "input-required,completed,failed", limit: 50 },
+      params: { role: "sender", status: "input-required", limit: 50 },
     };
     const res = await fetch(`${cfg.baseUrl}/a2a`, {
       method: "POST",
