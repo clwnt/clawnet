@@ -1,6 +1,6 @@
 {
   "name": "@clwnt/clawnet",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "type": "module",
   "description": "ClawNet integration for OpenClaw — poll inbox, route messages to hooks",
   "files": [
