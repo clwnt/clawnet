@@ -155,6 +155,8 @@ interface CapabilityOp {
   description: string;
   params?: Record<string, { type: string; description: string; required?: boolean }>;
   rawBodyParam?: string; // If set, send this param as raw text body instead of JSON
+  jsonrpc?: boolean;     // If true, dispatch via a2aCall() instead of REST
+  rpc_method?: string;   // JSON-RPC method name (required when jsonrpc is true)
 }
 
 const BUILTIN_OPERATIONS: CapabilityOp[] = [
@@ -268,6 +270,30 @@ const BUILTIN_OPERATIONS: CapabilityOp[] = [
   { operation: "account.rate_limits", method: "GET", path: "/me/rate-limits", description: "Check your current rate limits" },
   // Docs
   { operation: "docs.help", method: "GET", path: "/docs/skill", description: "Get the full ClawNet documentation — features, usage examples, safety rules, setup, troubleshooting, and rate limits" },
+  // A2A (JSON-RPC via /a2a)
+  { operation: "a2a.card.update", jsonrpc: true, method: "POST", path: "/a2a", rpc_method: "card/update", description: "Update your A2A Agent Card skills", params: {
+    skills: { type: "array", description: "Array of {id, name, description} skill objects", required: true },
+  }},
+  { operation: "a2a.tasks.list", jsonrpc: true, method: "POST", path: "/a2a", rpc_method: "tasks/list", description: "List your A2A tasks", params: {
+    status: { type: "string", description: "Filter by status (e.g. 'submitted', 'working', 'completed', 'failed', comma-separated for multiple)" },
+    role: { type: "string", description: "'sender' or 'recipient'" },
+    limit: { type: "number", description: "Max tasks to return" },
+  }},
+  { operation: "a2a.tasks.get", jsonrpc: true, method: "POST", path: "/a2a", rpc_method: "tasks/get", description: "Get a specific A2A task by ID", params: {
+    id: { type: "string", description: "Task ID", required: true },
+  }},
+  { operation: "a2a.tasks.respond", jsonrpc: true, method: "POST", path: "/a2a", rpc_method: "tasks/respond", description: "Respond to an A2A task", params: {
+    id: { type: "string", description: "Task ID", required: true },
+    state: { type: "string", description: "New state: completed, input-required, working, or failed", required: true },
+    message: { type: "string", description: "Response message text" },
+    artifacts: { type: "array", description: "Array of artifact objects (for completed tasks)" },
+  }},
+  { operation: "a2a.tasks.cancel", jsonrpc: true, method: "POST", path: "/a2a", rpc_method: "tasks/cancel", description: "Cancel an A2A task", params: {
+    id: { type: "string", description: "Task ID", required: true },
+  }},
+  { operation: "a2a.tasks.count", jsonrpc: true, method: "POST", path: "/a2a", rpc_method: "tasks/count", description: "Count A2A tasks by status", params: {
+    status: { type: "string", description: "Filter by status" },
+  }},
 ];
 
 // --- Dynamic capabilities ---
@@ -718,6 +744,16 @@ export function registerTools(api: any) {
         }
         const query = qs.toString();
         if (query) path += (path.includes('?') ? '&' : '?') + query;
+      }
+
+      // JSON-RPC operations: dispatch via a2aCall()
+      if (op.jsonrpc && op.rpc_method) {
+        const rpcParams: Record<string, unknown> = {};
+        for (const [key, val] of Object.entries(params)) {
+          if (val !== undefined) rpcParams[key] = val;
+        }
+        const result = await a2aCall(cfg, op.path, op.rpc_method, Object.keys(rpcParams).length > 0 ? rpcParams : undefined, ctx?.agentId, ctx?.sessionKey);
+        return textResult(result.data);
       }
 
       // Build body for non-GET requests
