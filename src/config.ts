@@ -14,6 +14,7 @@ export interface ClawnetConfig {
   debounceSeconds: number;
   maxBatchSize: number;
   deliver: { channel: string };
+  deliveryMethod: "hooks" | "agent";
   accounts: ClawnetAccount[];
   maxSnippetChars: number;
   setupVersion: number;
@@ -26,6 +27,7 @@ const DEFAULTS: ClawnetConfig = {
   debounceSeconds: 30,
   maxBatchSize: 10,
   deliver: { channel: "last" },
+  deliveryMethod: "agent",
   accounts: [],
   maxSnippetChars: 500,
   setupVersion: 0,
@@ -62,6 +64,8 @@ export function parseConfig(raw: Record<string, unknown>): ClawnetConfig {
         : DEFAULTS.maxSnippetChars,
     setupVersion:
       typeof raw.setupVersion === "number" ? raw.setupVersion : DEFAULTS.setupVersion,
+    deliveryMethod:
+      raw.deliveryMethod === "agent" ? "agent" : DEFAULTS.deliveryMethod,
     paused: raw.paused === true,
   };
 }
