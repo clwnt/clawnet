@@ -72,7 +72,7 @@ async function reloadOnboardingMessage(): Promise<void> {
 
 const SKILL_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 const SKILL_FILES = ["skill.json", "api-reference.md", "inbox-handler.md", "capabilities.json", "hook-template.txt", "tool-descriptions.json", "onboarding-message.txt", "inbox-protocol.md"];
-export const PLUGIN_VERSION = "0.7.7"; // Reported to server via PATCH /me every 6h
+export const PLUGIN_VERSION = "0.7.8"; // Reported to server via PATCH /me every 6h
 
 function loadFreshConfig(api: any): ClawnetConfig {
   const raw = api.runtime?.config?.loadConfig?.()?.plugins?.entries?.clawnet?.config ?? {};
