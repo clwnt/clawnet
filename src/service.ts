@@ -11,6 +11,7 @@ interface InboxMessage {
   content: string;
   subject?: string;
   created_at: string;
+  type: "email" | "task";
 }
 
 export interface ServiceState {
@@ -134,6 +135,9 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
 
   // --- Batch delivery ---
 
+  // Per-account auth context for mark-notified calls from deliverBatch
+  const accountAuth = new Map<string, { token: string; baseUrl: string }>();
+
   async function deliverBatch(accountId: string, agentId: string, messages: InboxMessage[]) {
     if (messages.length === 0) return;
 
@@ -163,6 +167,50 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
       api.logger.info(
         `[clawnet] ${accountId}: delivered ${messages.length} message(s) to ${agentId} via ${freshCfg.deliveryMethod}`,
       );
+
+      // Post-delivery: mark items as notified + mark A2A tasks as working
+      const auth = accountAuth.get(accountId);
+      if (auth) {
+        const emailIds = messages.filter((m) => m.type === "email").map((m) => m.id);
+        const taskIds = messages.filter((m) => m.type === "task").map((m) => m.id);
+
+        // Mark notified (non-fatal)
+        if (emailIds.length > 0 || taskIds.length > 0) {
+          try {
+            await fetch(`${auth.baseUrl}/inbox/mark-notified`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${auth.token}`, "Content-Type": "application/json" },
+              body: JSON.stringify({
+                ...(emailIds.length > 0 ? { message_ids: emailIds } : {}),
+                ...(taskIds.length > 0 ? { task_ids: taskIds } : {}),
+              }),
+            });
+            api.logger.debug?.(`[clawnet] ${accountId}: marked ${emailIds.length} message(s) + ${taskIds.length} task(s) notified`);
+          } catch (err: any) {
+            api.logger.warn(`[clawnet] ${accountId}: mark-notified failed (non-fatal): ${err.message}`);
+          }
+        }
+
+        // Mark incoming A2A tasks as 'working' (protocol semantics, separate from notification tracking)
+        for (const msg of messages) {
+          if (msg.type === "task" && msg.content.startsWith("[A2A Task ")) {
+            try {
+              await fetch(`${auth.baseUrl}/a2a`, {
+                method: "POST",
+                headers: { Authorization: `Bearer ${auth.token}`, "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: `ack-${msg.id}`,
+                  method: "tasks/respond",
+                  params: { id: msg.id, state: "working" },
+                }),
+              });
+            } catch {
+              // Non-fatal — task may get re-delivered next cycle
+            }
+          }
+        }
+      }
     } catch (err: any) {
       state.lastError = { message: err.message, at: new Date() };
       state.counters.errors++;
@@ -286,12 +334,15 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
 
   // --- Poll ---
 
-  async function pollAccount(account: ClawnetAccount): Promise<number> {
+  async function pollAccount(account: ClawnetAccount): Promise<{ a2aDmCount: number; sentTaskUpdates: number; notifyCount: number }> {
     const resolvedToken = resolveToken(account.token);
     if (!resolvedToken) {
       api.logger.warn(`[clawnet] No token resolved for account "${account.id}", skipping`);
-      return 0;
+      return { a2aDmCount: 0, sentTaskUpdates: 0, notifyCount: 0 };
     }
+
+    // Store auth context for deliverBatch to use for mark-notified calls
+    accountAuth.set(account.id, { token: resolvedToken, baseUrl: cfg.baseUrl });
 
     const headers = {
       Authorization: `Bearer ${resolvedToken}`,
@@ -307,11 +358,14 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
       count: number;
       task_count?: number;
       sent_task_updates?: number;
+      notify_count?: number;
       plugin_config?: {
         poll_seconds: number;
         debounce_seconds: number;
         max_batch_size: number;
         deliver_channel: string;
+        notify_on_new?: boolean;
+        remind_after_hours?: number | null;
       };
     };
 
@@ -342,23 +396,29 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
 
     const a2aDmCount = checkData.task_count ?? 0;
     const sentTaskUpdates = checkData.sent_task_updates ?? 0;
+    const notifyCount = checkData.notify_count ?? (checkData.count + a2aDmCount + sentTaskUpdates);
 
     if (checkData.count === 0) {
       // Email inbox clear — release any delivery lock (agent finished processing)
       deliveryLock.delete(account.id);
-      return { a2aDmCount, sentTaskUpdates };
+      return { a2aDmCount, sentTaskUpdates, notifyCount };
     }
 
-    // Skip if a recent webhook delivery is still being processed by the LLM.
+    // If nothing needs notification, skip fetch (but don't release lock — inbox still has items)
+    if (notifyCount === 0) {
+      return { a2aDmCount, sentTaskUpdates, notifyCount };
+    }
+
+    // Skip if a recent delivery is still being processed.
     // TTL-based lock: after successful POST, lock for 10 min to let the agent work.
     const lockUntil = deliveryLock.get(account.id);
     if (lockUntil && new Date() < lockUntil) {
       api.logger.debug?.(`[clawnet] ${account.id}: ${checkData.count} message(s) waiting (delivery lock active, skipping)`);
-      return { a2aDmCount, sentTaskUpdates };
+      return { a2aDmCount, sentTaskUpdates, notifyCount };
     }
 
     state.lastInboxNonEmptyAt = new Date();
-    api.logger.info(`[clawnet] ${account.id}: ${checkData.count} message(s) waiting`);
+    api.logger.info(`[clawnet] ${account.id}: ${checkData.count} message(s) waiting (${notifyCount} to notify)`);
 
     // Fetch full messages
     const inboxRes = await fetch(`${cfg.baseUrl}/inbox`, { headers });
@@ -367,7 +427,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
     }
     const inboxData = (await inboxRes.json()) as { messages: Array<Record<string, any>> };
 
-    if (inboxData.messages.length === 0) return { a2aDmCount, sentTaskUpdates };
+    if (inboxData.messages.length === 0) return { a2aDmCount, sentTaskUpdates, notifyCount };
 
     // Normalize API field names: API returns "from", plugin uses "from_agent"
     const normalized: InboxMessage[] = inboxData.messages.map((m) => ({
@@ -376,6 +436,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
       content: m.content,
       subject: m.email?.subject ?? m.subject,
       created_at: m.created_at,
+      type: "email" as const,
     }));
 
     state.counters.messagesSeen += normalized.length;
@@ -385,7 +446,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
     pendingMessages.set(account.id, [...existing, ...normalized]);
     scheduleFlush(account.id, account.agentId);
 
-    return { a2aDmCount, sentTaskUpdates };
+    return { a2aDmCount, sentTaskUpdates, notifyCount };
   }
 
   async function pollAccountA2A(account: ClawnetAccount, a2aDmCount: number) {
@@ -427,7 +488,8 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
 
     api.logger.info(`[clawnet] ${account.id}: ${tasks.length} A2A task(s) to deliver`);
 
-    // Convert A2A tasks to the message format the hook expects
+    // Convert A2A tasks to the message format for delivery
+    // Working transition + mark-notified happen post-delivery in deliverBatch
     const messages: InboxMessage[] = tasks.map((task) => {
       const history = task.history as Array<{ role: string; parts: Array<{ text?: string }> }> ?? [];
       const lastMsg = history[history.length - 1];
@@ -438,6 +500,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
         from_agent: task.from,
         content: `[A2A Task ${task.id}]${contactInfo}\n${text}`,
         created_at: (task.status as any)?.timestamp ?? new Date().toISOString(),
+        type: "task" as const,
       };
     });
 
@@ -445,28 +508,6 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
     const existing = pendingMessages.get(account.id) ?? [];
     pendingMessages.set(account.id, [...existing, ...messages]);
     scheduleFlush(account.id, account.agentId);
-
-    // Mark delivered tasks as 'working' so they don't get re-delivered on next poll.
-    // This is the equivalent of marking emails 'read' — acknowledges receipt.
-    for (const task of tasks) {
-      try {
-        await fetch(`${cfg.baseUrl}/a2a`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${resolvedToken}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            jsonrpc: "2.0",
-            id: `ack-${task.id}`,
-            method: "tasks/respond",
-            params: { id: task.id, state: "working" },
-          }),
-        });
-      } catch {
-        // Non-fatal — task may get re-delivered next cycle
-      }
-    }
   }
 
   async function pollSentTaskUpdates(account: ClawnetAccount) {
@@ -477,12 +518,12 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
     const lockUntil = deliveryLock.get(account.id);
     if (lockUntil && new Date() < lockUntil) return;
 
-    // Fetch tasks I sent that need attention
+    // Fetch tasks I sent that need my attention or have finished
     const body = {
       jsonrpc: "2.0",
       id: `sent-poll-${Date.now()}`,
       method: "tasks/list",
-      params: { role: "sender", status: "input-required", limit: 50 },
+      params: { role: "sender", status: "input-required,completed,failed", limit: 50 },
     };
     const res = await fetch(`${cfg.baseUrl}/a2a`, {
       method: "POST",
@@ -512,6 +553,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
         from_agent: task.to, // the agent that responded
         content: `[Task update: ${taskState}] Re: "${text.slice(0, 100)}${text.length > 100 ? "…" : ""}"`,
         created_at: (task.status as any)?.timestamp ?? new Date().toISOString(),
+        type: "task" as const,
       };
     });
 
