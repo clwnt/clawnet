@@ -389,8 +389,16 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
         cfg.deliver.channel = pc.deliver_channel;
         changed = true;
       }
+      if (pc.notify_on_new !== undefined && pc.notify_on_new !== cfg.notifyOnNew) {
+        cfg.notifyOnNew = pc.notify_on_new;
+        changed = true;
+      }
+      if (pc.remind_after_hours !== undefined && pc.remind_after_hours !== cfg.remindAfterHours) {
+        cfg.remindAfterHours = pc.remind_after_hours;
+        changed = true;
+      }
       if (changed) {
-        api.logger.info(`[clawnet] Config updated from server: poll=${cfg.pollEverySeconds}s debounce=${cfg.debounceSeconds}s batch=${cfg.maxBatchSize}`);
+        api.logger.info(`[clawnet] Config updated from server: poll=${cfg.pollEverySeconds}s debounce=${cfg.debounceSeconds}s batch=${cfg.maxBatchSize} notify=${cfg.notifyOnNew} remind=${cfg.remindAfterHours ?? "never"}`);
       }
     }
 

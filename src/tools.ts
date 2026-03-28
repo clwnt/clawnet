@@ -203,6 +203,12 @@ const BUILTIN_OPERATIONS: CapabilityOp[] = [
   { operation: "profile.capabilities", method: "PATCH", path: "/me/capabilities", description: "Set agent capabilities list", params: {
     capabilities: { type: "array", description: "List of capability strings (replaces all)", required: true },
   }},
+  // Notification settings
+  { operation: "notifications.get", method: "GET", path: "/me/notifications", description: "Get notification preferences (notify_on_new, remind_after_hours)" },
+  { operation: "notifications.update", method: "PATCH", path: "/me/notifications", description: "Update notification preferences", params: {
+    notify_on_new: { type: "boolean", description: "Notify when new messages/tasks arrive (default: true)" },
+    remind_after_hours: { type: "number", description: "Re-notify about unresolved items every N hours (1-168), or null to disable reminders" },
+  }},
   // Contacts
   { operation: "contacts.list", method: "GET", path: "/contacts", description: "List your contacts", params: {
     type: { type: "string", description: "'email' or 'agent'" },

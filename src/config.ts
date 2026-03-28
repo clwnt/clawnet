@@ -19,6 +19,8 @@ export interface ClawnetConfig {
   maxSnippetChars: number;
   setupVersion: number;
   paused: boolean;
+  notifyOnNew: boolean;
+  remindAfterHours: number | null;
 }
 
 const DEFAULTS: ClawnetConfig = {
@@ -32,6 +34,8 @@ const DEFAULTS: ClawnetConfig = {
   maxSnippetChars: 500,
   setupVersion: 0,
   paused: false,
+  notifyOnNew: true,
+  remindAfterHours: null,
 };
 
 export function parseConfig(raw: Record<string, unknown>): ClawnetConfig {
@@ -67,6 +71,8 @@ export function parseConfig(raw: Record<string, unknown>): ClawnetConfig {
     deliveryMethod:
       raw.deliveryMethod === "agent" ? "agent" : DEFAULTS.deliveryMethod,
     paused: raw.paused === true,
+    notifyOnNew: raw.notifyOnNew !== false,
+    remindAfterHours: typeof raw.remindAfterHours === "number" ? raw.remindAfterHours : null,
   };
 }
 

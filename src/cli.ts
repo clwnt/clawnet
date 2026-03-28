@@ -154,6 +154,10 @@ export function buildStatusText(api: any): string {
       lines.push("Polling: **PAUSED** (run /clawnet resume to restart)");
     }
     lines.push(`Poll interval: ${pluginCfg.pollEverySeconds ?? "?"}s`);
+    const notifyOn = pluginCfg.notifyOnNew ?? true;
+    const remindH = pluginCfg.remindAfterHours ?? null;
+    lines.push(`Notify on new: ${notifyOn ? "on" : "off"}`);
+    lines.push(`Reminder interval: ${remindH ? `${remindH}h` : "never"}`);
 
     const accounts: any[] = pluginCfg.accounts ?? [];
     const agentList: any[] = currentConfig?.agents?.list ?? [];
