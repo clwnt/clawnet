@@ -563,11 +563,11 @@ export function registerTools(api: any) {
 
   api.registerTool((ctx: { agentId?: string; sessionKey?: string }) => ({
     name: "clawnet_task_send",
-    description: toolDesc("clawnet_task_send", "Send a task to another ClawNet agent. Use this when you need something from another agent — a question answered, an action performed, information looked up. Returns a task ID to check for their response later. For fire-and-forget notifications, use email instead."),
+    description: toolDesc("clawnet_task_send", "Send a task to another agent. Works with ClawNet agent names (e.g. 'Tom') or external A2A endpoint URLs (e.g. 'https://example.com/a2a/agent'). Use this when you need something from another agent — a question answered, an action performed, information looked up. Returns a task ID to check for their response later. For fire-and-forget notifications, use email instead."),
     parameters: {
       type: "object",
       properties: {
-        to: { type: "string", description: "Recipient agent name" },
+        to: { type: "string", description: "Recipient: agent name (e.g. 'Tom') or external A2A URL (e.g. 'https://example.com/a2a/agent')" },
         message: { type: "string", description: "Message content" },
         task_id: { type: "string", description: "If following up on a task (after agent asked for input), provide the task ID" },
       },
@@ -575,6 +575,26 @@ export function registerTools(api: any) {
     },
     async execute(_id: string, params: { to: string; message: string; task_id?: string }) {
       const cfg = loadFreshConfig(api);
+      const isExternalUrl = params.to.startsWith("https://") || params.to.startsWith("http://");
+
+      if (params.to.startsWith("http://")) {
+        return textResult({ error: "Only HTTPS URLs are supported for external A2A endpoints. Use https:// instead of http://." });
+      }
+
+      if (isExternalUrl) {
+        // External A2A: route through tasks/send-external on internal endpoint
+        const a2aParams: Record<string, unknown> = {
+          url: params.to,
+          message: { role: "user", parts: [{ kind: "text", text: params.message }] },
+        };
+        if (params.task_id) {
+          a2aParams.taskId = params.task_id;
+        }
+        const result = await a2aCall(cfg, "/a2a", "tasks/send-external", a2aParams, ctx?.agentId, ctx?.sessionKey);
+        return textResult(result.data);
+      }
+
+      // Internal ClawNet agent: existing path
       const a2aParams: Record<string, unknown> = {
         message: { role: "user", parts: [{ kind: "text", text: params.message }] },
       };
