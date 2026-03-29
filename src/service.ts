@@ -177,7 +177,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
         // Mark notified (non-fatal)
         if (emailIds.length > 0 || taskIds.length > 0) {
           try {
-            await fetch(`${auth.baseUrl}/inbox/mark-notified`, {
+            const markRes = await fetch(`${auth.baseUrl}/inbox/mark-notified`, {
               method: "POST",
               headers: { Authorization: `Bearer ${auth.token}`, "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -185,7 +185,13 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
                 ...(taskIds.length > 0 ? { task_ids: taskIds } : {}),
               }),
             });
-            api.logger.debug?.(`[clawnet] ${accountId}: marked ${emailIds.length} message(s) + ${taskIds.length} task(s) notified`);
+            if (markRes.ok) {
+              const markData = await markRes.json().catch(() => ({})) as Record<string, unknown>;
+              api.logger.info(`[clawnet] ${accountId}: marked notified (${markData.marked_messages ?? 0} msgs, ${markData.marked_tasks ?? 0} tasks)`);
+            } else {
+              const errText = await markRes.text().catch(() => "");
+              api.logger.warn(`[clawnet] ${accountId}: mark-notified returned ${markRes.status}: ${errText}`);
+            }
           } catch (err: any) {
             api.logger.warn(`[clawnet] ${accountId}: mark-notified failed (non-fatal): ${err.message}`);
           }
@@ -615,10 +621,10 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
     let hadError = false;
     for (const account of enabledAccounts) {
       try {
-        const { a2aDmCount, sentTaskUpdates } = await pollAccount(account);
+        const { a2aDmCount, sentTaskUpdates, notifyCount } = await pollAccount(account);
 
         // Also poll for A2A DMs if any pending
-        if (a2aDmCount > 0) {
+        if (a2aDmCount > 0 && notifyCount > 0) {
           try {
             await pollAccountA2A(account, a2aDmCount);
           } catch (a2aErr: any) {
@@ -627,7 +633,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
         }
 
         // Poll for sent task updates (tasks I sent that got a response)
-        if (sentTaskUpdates > 0) {
+        if (sentTaskUpdates > 0 && notifyCount > 0) {
           try {
             await pollSentTaskUpdates(account);
           } catch (err: any) {
