@@ -35,7 +35,7 @@ const DEFAULTS: ClawnetConfig = {
   setupVersion: 0,
   paused: false,
   notifyOnNew: true,
-  remindAfterHours: null,
+  remindAfterHours: 4,
 };
 
 export function parseConfig(raw: Record<string, unknown>): ClawnetConfig {
