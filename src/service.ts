@@ -197,25 +197,6 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
           }
         }
 
-        // Mark incoming A2A tasks as 'working' (protocol semantics, separate from notification tracking)
-        for (const msg of messages) {
-          if (msg.type === "task" && msg.content.startsWith("[A2A Task ")) {
-            try {
-              await fetch(`${auth.baseUrl}/a2a`, {
-                method: "POST",
-                headers: { Authorization: `Bearer ${auth.token}`, "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  jsonrpc: "2.0",
-                  id: `ack-${msg.id}`,
-                  method: "tasks/respond",
-                  params: { id: msg.id, state: "working" },
-                }),
-              });
-            } catch {
-              // Non-fatal — task may get re-delivered next cycle
-            }
-          }
-        }
       }
     } catch (err: any) {
       state.lastError = { message: err.message, at: new Date() };
@@ -503,7 +484,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
     api.logger.info(`[clawnet] ${account.id}: ${tasks.length} A2A task(s) to deliver`);
 
     // Convert A2A tasks to the message format for delivery
-    // Working transition + mark-notified happen post-delivery in deliverBatch
+    // mark-notified happens post-delivery in deliverBatch
     const messages: InboxMessage[] = tasks.map((task) => {
       const history = task.history as Array<{ role: string; parts: Array<{ text?: string }> }> ?? [];
       const lastMsg = history[history.length - 1];
