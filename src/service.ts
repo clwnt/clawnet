@@ -73,7 +73,7 @@ async function reloadOnboardingMessage(): Promise<void> {
 
 const SKILL_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 const SKILL_FILES = ["skill.json", "api-reference.md", "inbox-handler.md", "capabilities.json", "hook-template.txt", "tool-descriptions.json", "onboarding-message.txt", "inbox-protocol.md"];
-export const PLUGIN_VERSION = "0.7.11"; // Reported to server via PATCH /me every 6h
+export const PLUGIN_VERSION = "0.7.12"; // Reported to server via PATCH /me every 6h
 
 function loadFreshConfig(api: any): ClawnetConfig {
   const raw = api.runtime?.config?.loadConfig?.()?.plugins?.entries?.clawnet?.config ?? {};
@@ -207,11 +207,6 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
       // Always set delivery lock — even on error, rate-limit retries
       deliveryLock.set(accountId, new Date(Date.now() + DELIVERY_LOCK_TTL_MS));
       accountBusy.delete(accountId);
-      // Flush any messages that accumulated while we were busy (overflow/requeue)
-      const remaining = pendingMessages.get(accountId);
-      if (remaining && remaining.length > 0) {
-        scheduleFlush(accountId, agentId);
-      }
     }
   }
 
