@@ -165,7 +165,6 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
 
       state.counters.batchesSent++;
       state.counters.delivered += messages.length;
-      deliveryLock.set(accountId, new Date(Date.now() + DELIVERY_LOCK_TTL_MS));
       api.logger.info(
         `[clawnet] ${accountId}: delivered ${messages.length} message(s) to ${agentId} via ${freshCfg.deliveryMethod}`,
       );
@@ -205,6 +204,8 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
       state.counters.errors++;
       api.logger.error(`[clawnet] ${accountId}: batch delivery failed: ${err.message}`);
     } finally {
+      // Always set delivery lock — even on error, rate-limit retries
+      deliveryLock.set(accountId, new Date(Date.now() + DELIVERY_LOCK_TTL_MS));
       accountBusy.delete(accountId);
       // Flush any messages that accumulated while we were busy (overflow/requeue)
       const remaining = pendingMessages.get(accountId);
