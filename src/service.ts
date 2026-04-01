@@ -373,19 +373,19 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
     if (checkData.plugin_config) {
       const pc = checkData.plugin_config;
       let changed = false;
-      if (pc.poll_seconds !== cfg.pollEverySeconds) {
+      if (pc.poll_seconds !== undefined && pc.poll_seconds !== cfg.pollEverySeconds) {
         cfg.pollEverySeconds = pc.poll_seconds;
         changed = true;
       }
-      if (pc.debounce_seconds !== cfg.debounceSeconds) {
+      if (pc.debounce_seconds !== undefined && pc.debounce_seconds !== cfg.debounceSeconds) {
         cfg.debounceSeconds = pc.debounce_seconds;
         changed = true;
       }
-      if (pc.max_batch_size !== cfg.maxBatchSize) {
+      if (pc.max_batch_size !== undefined && pc.max_batch_size !== cfg.maxBatchSize) {
         cfg.maxBatchSize = pc.max_batch_size;
         changed = true;
       }
-      if (pc.deliver_channel !== cfg.deliver.channel) {
+      if (pc.deliver_channel !== undefined && pc.deliver_channel !== cfg.deliver.channel) {
         cfg.deliver.channel = pc.deliver_channel;
         changed = true;
       }
