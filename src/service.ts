@@ -73,7 +73,7 @@ async function reloadOnboardingMessage(): Promise<void> {
 
 const SKILL_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 const SKILL_FILES = ["skill.json", "api-reference.md", "inbox-handler.md", "capabilities.json", "hook-template.txt", "tool-descriptions.json", "onboarding-message.txt", "inbox-protocol.md"];
-export const PLUGIN_VERSION = "0.7.8"; // Reported to server via PATCH /me every 6h
+export const PLUGIN_VERSION = "0.7.10"; // Reported to server via PATCH /me every 6h
 
 function loadFreshConfig(api: any): ClawnetConfig {
   const raw = api.runtime?.config?.loadConfig?.()?.plugins?.entries?.clawnet?.config ?? {};
@@ -145,7 +145,9 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
     if (accountBusy.has(accountId)) {
       api.logger.info(`[clawnet] ${accountId}: LLM run in progress, requeueing ${messages.length} message(s)`);
       const existing = pendingMessages.get(accountId) ?? [];
-      pendingMessages.set(accountId, [...existing, ...messages]);
+      const existingIds = new Set(existing.map((m) => m.id));
+      const fresh = messages.filter((m) => !existingIds.has(m.id));
+      pendingMessages.set(accountId, [...existing, ...fresh]);
       return;
     }
 
@@ -204,6 +206,11 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
       api.logger.error(`[clawnet] ${accountId}: batch delivery failed: ${err.message}`);
     } finally {
       accountBusy.delete(accountId);
+      // Flush any messages that accumulated while we were busy (overflow/requeue)
+      const remaining = pendingMessages.get(accountId);
+      if (remaining && remaining.length > 0) {
+        scheduleFlush(accountId, agentId);
+      }
     }
   }
 
@@ -436,9 +443,11 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
 
     state.counters.messagesSeen += normalized.length;
 
-    // Add to pending and schedule debounced flush
+    // Add to pending (dedup by ID) and schedule debounced flush
     const existing = pendingMessages.get(account.id) ?? [];
-    pendingMessages.set(account.id, [...existing, ...normalized]);
+    const existingIds = new Set(existing.map((m) => m.id));
+    const fresh = normalized.filter((m) => !existingIds.has(m.id));
+    pendingMessages.set(account.id, [...existing, ...fresh]);
     scheduleFlush(account.id, account.agentId);
 
     return { a2aDmCount, sentTaskUpdates, notifyCount };
@@ -501,7 +510,9 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
 
     state.counters.messagesSeen += messages.length;
     const existing = pendingMessages.get(account.id) ?? [];
-    pendingMessages.set(account.id, [...existing, ...messages]);
+    const existingIds = new Set(existing.map((m) => m.id));
+    const freshTasks = messages.filter((m) => !existingIds.has(m.id));
+    pendingMessages.set(account.id, [...existing, ...freshTasks]);
     scheduleFlush(account.id, account.agentId);
   }
 
@@ -554,7 +565,9 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
 
     state.counters.messagesSeen += messages.length;
     const existing = pendingMessages.get(account.id) ?? [];
-    pendingMessages.set(account.id, [...existing, ...messages]);
+    const existingIds = new Set(existing.map((m) => m.id));
+    const freshUpdates = messages.filter((m) => !existingIds.has(m.id));
+    pendingMessages.set(account.id, [...existing, ...freshUpdates]);
     scheduleFlush(account.id, account.agentId);
   }
 
