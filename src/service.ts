@@ -429,8 +429,8 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
     state.lastInboxNonEmptyAt = new Date();
     api.logger.info(`[clawnet] ${account.id}: ${checkData.count} message(s) waiting (${notifyCount} to notify)`);
 
-    // Fetch full messages — request max limit so mark-notified covers everything
-    const inboxRes = await fetch(`${cfg.baseUrl}/inbox?limit=200`, { headers });
+    // Fetch messages for delivery (mark-notified handled server-side in /inbox/check)
+    const inboxRes = await fetch(`${cfg.baseUrl}/inbox`, { headers });
     if (!inboxRes.ok) {
       throw new Error(`/inbox returned ${inboxRes.status}`);
     }
@@ -450,21 +450,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
 
     state.counters.messagesSeen += normalized.length;
 
-    // Mark ALL fetched emails as notified up front — the delivery batch is capped
-    // at maxBatchSize, but the nag timer should reset for every message the agent
-    // is being alerted about, not just the ones in the batch.
-    const allEmailIds = normalized.map((m) => m.id);
-    if (allEmailIds.length > 0) {
-      try {
-        await fetch(`${cfg.baseUrl}/inbox/mark-notified`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify({ message_ids: allEmailIds }),
-        });
-      } catch {
-        // Non-fatal — deliverBatch will still mark its batch after delivery
-      }
-    }
+    // Server-side /inbox/check auto-marks all notifiable items — no separate call needed
 
     // Add to pending (dedup by ID) and schedule debounced flush
     const existing = pendingMessages.get(account.id) ?? [];
@@ -533,22 +519,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
 
     state.counters.messagesSeen += messages.length;
 
-    // Mark all fetched tasks as notified up front (same rationale as emails)
-    const allTaskIds = messages.map((m) => m.id);
-    if (allTaskIds.length > 0) {
-      try {
-        await fetch(`${cfg.baseUrl}/inbox/mark-notified`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${resolvedToken}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ task_ids: allTaskIds }),
-        });
-      } catch {
-        // Non-fatal
-      }
-    }
+    // Server-side /inbox/check auto-marks all notifiable items — no separate call needed
 
     const existing = pendingMessages.get(account.id) ?? [];
     const existingIds = new Set(existing.map((m) => m.id));
@@ -606,22 +577,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
 
     state.counters.messagesSeen += messages.length;
 
-    // Mark all fetched sent-task updates as notified up front (same rationale as emails)
-    const allSentTaskIds = messages.map((m) => m.id);
-    if (allSentTaskIds.length > 0) {
-      try {
-        await fetch(`${cfg.baseUrl}/inbox/mark-notified`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${resolvedToken}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ task_ids: allSentTaskIds }),
-        });
-      } catch {
-        // Non-fatal
-      }
-    }
+    // Server-side /inbox/check auto-marks all notifiable items — no separate call needed
 
     const existing = pendingMessages.get(account.id) ?? [];
     const existingIds = new Set(existing.map((m) => m.id));
