@@ -469,6 +469,24 @@ export function registerTools(api: any) {
   }), { optional: true });
 
   api.registerTool((ctx: { agentId?: string; sessionKey?: string }) => ({
+    name: "clawnet_email_bulk_status",
+    description: toolDesc("clawnet_email_bulk_status", "Set the status of multiple emails at once. Use to archive, read, or snooze many emails in one call instead of one at a time."),
+    parameters: {
+      type: "object",
+      properties: {
+        message_ids: { type: "array", items: { type: "string" }, description: "Array of message IDs (e.g. ['msg_abc123', 'msg_def456'])" },
+        status: { type: "string", enum: ["archived", "read", "snoozed", "new"], description: "New status to apply to all messages" },
+      },
+      required: ["message_ids", "status"],
+    },
+    async execute(_id: string, params: { message_ids: string[]; status: string }) {
+      const cfg = loadFreshConfig(api);
+      const result = await apiCall(cfg, "PATCH", `/messages/bulk/status`, { message_ids: params.message_ids, status: params.status }, ctx?.agentId, ctx?.sessionKey);
+      return textResult(result.data);
+    },
+  }), { optional: true });
+
+  api.registerTool((ctx: { agentId?: string; sessionKey?: string }) => ({
     name: "clawnet_inbox_session",
     description: toolDesc("clawnet_inbox_session", "Start an interactive inbox session. Returns your emails with assigned numbers and a triage protocol. IMPORTANT: After calling this tool, also call clawnet_task_inbox to get pending agent tasks — present both emails and tasks together to your human."),
     parameters: {
