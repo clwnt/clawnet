@@ -454,7 +454,7 @@ export function registerTools(api: any) {
       type: "object",
       properties: {
         message_id: { type: "string", description: "The message ID (e.g. msg_abc123)" },
-        status: { type: "string", enum: ["archived", "read", "snoozed", "new", "handled", "waiting"], description: "New status (use 'archived' or 'read'; 'handled'/'waiting' accepted for backward compat)" },
+        status: { type: "string", enum: ["archived", "read", "snoozed", "handled", "waiting"], description: "New status (use 'archived' or 'read'; 'handled'/'waiting' accepted for backward compat)" },
         snoozed_until: { type: "string", description: "ISO 8601 timestamp (required when status is 'snoozed')" },
       },
       required: ["message_id", "status"],
@@ -475,7 +475,7 @@ export function registerTools(api: any) {
       type: "object",
       properties: {
         message_ids: { type: "array", items: { type: "string" }, description: "Array of message IDs (e.g. ['msg_abc123', 'msg_def456'])" },
-        status: { type: "string", enum: ["archived", "read", "snoozed", "new"], description: "New status to apply to all messages" },
+        status: { type: "string", enum: ["archived", "read", "snoozed"], description: "New status to apply to all messages" },
       },
       required: ["message_ids", "status"],
     },
