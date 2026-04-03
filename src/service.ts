@@ -135,9 +135,6 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
 
   // --- Batch delivery ---
 
-  // Per-account auth context for mark-notified calls from deliverBatch
-  const accountAuth = new Map<string, { token: string; baseUrl: string }>();
-
   async function deliverBatch(accountId: string, agentId: string, messages: InboxMessage[]) {
     if (messages.length === 0) return;
 
@@ -179,36 +176,8 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
         `[clawnet] ${accountId}: delivered ${messages.length} message(s) to ${agentId} via ${freshCfg.deliveryMethod}`,
       );
 
-      // Post-delivery: mark items as notified + mark A2A tasks as working
-      const auth = accountAuth.get(accountId);
-      if (auth) {
-        const emailIds = messages.filter((m) => m.type === "email").map((m) => m.id);
-        const taskIds = messages.filter((m) => m.type === "task").map((m) => m.id);
-
-        // Mark notified (non-fatal)
-        if (emailIds.length > 0 || taskIds.length > 0) {
-          try {
-            const markRes = await fetch(`${auth.baseUrl}/inbox/mark-notified`, {
-              method: "POST",
-              headers: { Authorization: `Bearer ${auth.token}`, "Content-Type": "application/json" },
-              body: JSON.stringify({
-                ...(emailIds.length > 0 ? { message_ids: emailIds } : {}),
-                ...(taskIds.length > 0 ? { task_ids: taskIds } : {}),
-              }),
-            });
-            if (markRes.ok) {
-              const markData = await markRes.json().catch(() => ({})) as Record<string, unknown>;
-              api.logger.info(`[clawnet] ${accountId}: marked notified (${markData.marked_messages ?? 0} msgs, ${markData.marked_tasks ?? 0} tasks)`);
-            } else {
-              const errText = await markRes.text().catch(() => "");
-              api.logger.warn(`[clawnet] ${accountId}: mark-notified returned ${markRes.status}: ${errText}`);
-            }
-          } catch (err: any) {
-            api.logger.warn(`[clawnet] ${accountId}: mark-notified failed (non-fatal): ${err.message}`);
-          }
-        }
-
-      }
+      // Notification tracking is now server-side (agent-level last_nagged_at).
+      // No mark-notified call needed.
     } catch (err: any) {
       state.lastError = { message: err.message, at: new Date() };
       state.counters.errors++;
@@ -341,9 +310,6 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
       return { a2aDmCount: 0, sentTaskUpdates: 0, notifyCount: 0 };
     }
 
-    // Store auth context for deliverBatch to use for mark-notified calls
-    accountAuth.set(account.id, { token: resolvedToken, baseUrl: cfg.baseUrl });
-
     const headers = {
       Authorization: `Bearer ${resolvedToken}`,
       "Content-Type": "application/json",
@@ -429,7 +395,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
     state.lastInboxNonEmptyAt = new Date();
     api.logger.info(`[clawnet] ${account.id}: ${checkData.count} message(s) waiting (${notifyCount} to notify)`);
 
-    // Fetch messages for delivery (mark-notified handled server-side in /inbox/check)
+    // Fetch messages for delivery (notification tracking is server-side via last_nagged_at)
     const inboxRes = await fetch(`${cfg.baseUrl}/inbox`, { headers });
     if (!inboxRes.ok) {
       throw new Error(`/inbox returned ${inboxRes.status}`);
@@ -502,7 +468,7 @@ export function createClawnetService(params: { api: any; cfg: ClawnetConfig }) {
     api.logger.info(`[clawnet] ${account.id}: ${tasks.length} A2A task(s) to deliver`);
 
     // Convert A2A tasks to the message format for delivery
-    // mark-notified happens post-delivery in deliverBatch
+    // Notification tracking is server-side via last_nagged_at
     const messages: InboxMessage[] = tasks.map((task) => {
       const history = task.history as Array<{ role: string; parts: Array<{ text?: string }> }> ?? [];
       const lastMsg = history[history.length - 1];
