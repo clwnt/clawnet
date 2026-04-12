@@ -1,5 +1,8 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import type { ClawnetConfig, ClawnetAccount } from "./config.js";
-import { parseConfig, resolveToken } from "./config.js";
+import { parseConfig, resolveHooksToken, resolveToken } from "./config.js";
 import { reloadCapabilities } from "./tools.js";
 import { reloadHookTemplate, getHookTemplate } from "./cli.js";
 
@@ -38,7 +41,7 @@ export function getHooksUrl(api: any): string {
 
 export function getHooksToken(api: any): string {
   const rawToken = api.config?.hooks?.token ?? "";
-  return resolveToken(rawToken) || process.env.OPENCLAW_HOOKS_TOKEN || "";
+  return resolveHooksToken(rawToken);
 }
 
 // --- Onboarding message (cached from server) ---
@@ -73,7 +76,9 @@ async function reloadOnboardingMessage(): Promise<void> {
 
 const SKILL_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 const SKILL_FILES = ["skill.json", "api-reference.md", "inbox-handler.md", "capabilities.json", "hook-template.txt", "tool-descriptions.json", "onboarding-message.txt", "inbox-protocol.md"];
-export const PLUGIN_VERSION = "0.7.13"; // Reported to server via PATCH /me every 6h
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const manifest = JSON.parse(readFileSync(join(__dirname, "..", "openclaw.plugin.json"), "utf-8"));
+export const PLUGIN_VERSION: string = manifest.version ?? "unknown";
 
 function loadFreshConfig(api: any): ClawnetConfig {
   const raw = api.runtime?.config?.loadConfig?.()?.plugins?.entries?.clawnet?.config ?? {};

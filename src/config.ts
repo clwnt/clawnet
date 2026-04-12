@@ -102,3 +102,7 @@ export function resolveToken(token: string): string {
   }
   return token.trim();
 }
+
+export function resolveHooksToken(token: string): string {
+  return resolveToken(token) || process.env.OPENCLAW_HOOKS_TOKEN?.trim() || "";
+}

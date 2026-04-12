@@ -1,7 +1,7 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 import { registerClawnetCli, buildClawnetMapping, upsertMapping, buildStatusText } from "./src/cli.js";
 import { createClawnetService, getHooksUrl, getHooksToken } from "./src/service.js";
-import { parseConfig } from "./src/config.js";
+import { parseConfig, resolveToken } from "./src/config.js";
 import { registerTools, loadToolDescriptions } from "./src/tools.js";
 import { migrateConfig, CURRENT_SETUP_VERSION } from "./src/migrate.js";
 
@@ -56,9 +56,7 @@ const plugin = {
           if (enabledAccounts.length > 0) {
             const issues: string[] = [];
             for (const account of enabledAccounts) {
-              const tokenRef = account.token ?? "";
-              const envMatch = tokenRef.match(/^\$\{(.+)\}$/);
-              const token = envMatch ? process.env[envMatch[1]] || "" : tokenRef;
+              const token = resolveToken(typeof account.token === "string" ? account.token : "");
               if (!token) {
                 issues.push(`${account.agentId}: no token resolved`);
                 continue;
