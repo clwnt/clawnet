@@ -5,6 +5,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
 import type { ClawnetConfig } from "./config.js";
+import { resolveToken } from "./config.js";
 import { PLUGIN_VERSION } from "./service.js";
 
 const API_BASE = "https://api.clwnt.com";
@@ -487,19 +488,13 @@ export function registerClawnetCli(params: { program: Command; api: any; cfg: Cl
             cfg.tools.alsoAllow.push("clawnet");
           }
 
-          // Enable optional (side-effect) tools for the target agent
+          // Ensure agent entry exists (for hooks/session config)
           if (!cfg.agents) cfg.agents = {};
           if (!cfg.agents.list) cfg.agents.list = [];
           let agentEntry = cfg.agents.list.find((a: any) => a.id === targetAgent);
           if (!agentEntry) {
-            agentEntry = { id: targetAgent, tools: { allow: ["clawnet"] } };
+            agentEntry = { id: targetAgent };
             cfg.agents.list.push(agentEntry);
-          } else {
-            if (!agentEntry.tools) agentEntry.tools = {};
-            if (!agentEntry.tools.allow) agentEntry.tools.allow = [];
-            if (!agentEntry.tools.allow.includes("clawnet")) {
-              agentEntry.tools.allow.push("clawnet");
-            }
           }
 
           // Set dmScope to "main" for single-owner setups (enables channel:"last" for hooks)
@@ -660,9 +655,7 @@ export function registerClawnetCli(params: { program: Command; api: any; cfg: Cl
         console.log("\n  Connectivity:\n");
         const routingIssues: string[] = [];
         for (const account of pluginCfg.accounts) {
-          const tokenRef = account.token;
-          const match = tokenRef.match(/^\$\{(.+)\}$/);
-          const resolvedToken = match ? process.env[match[1]] || "" : tokenRef;
+          const resolvedToken = resolveToken(typeof account.token === "string" ? account.token : "");
 
           if (!resolvedToken) {
             console.log(`    ${account.id}: NO TOKEN (env var not set)`);

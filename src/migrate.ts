@@ -4,7 +4,7 @@
 // Each migration targets a setupVersion and mutates the full OpenClaw config object.
 // Only safe, additive changes belong here — anything needing user input goes through `openclaw clawnet setup`.
 
-export const CURRENT_SETUP_VERSION = 1;
+export const CURRENT_SETUP_VERSION = 2;
 
 interface Migration {
   version: number; // setupVersion this migration brings you to
@@ -14,15 +14,44 @@ interface Migration {
 
 // Add new migrations here. They run in order for any setupVersion < their version.
 const migrations: Migration[] = [
-  // Example:
-  // {
-  //   version: 2,
-  //   name: "add-some-new-default",
-  //   run(cfg) {
-  //     const pc = cfg.plugins?.entries?.clawnet?.config;
-  //     if (pc) pc.someNewField ??= "default-value";
-  //   },
-  // },
+  {
+    version: 2,
+    name: "tools-allow-to-alsoAllow",
+    run(cfg, api) {
+      // Move "clawnet" from agent-level tools.allow to global tools.alsoAllow.
+      // tools.allow is a restrictive allowlist — having only ["clawnet"] blocks all
+      // other tools. tools.alsoAllow is additive and the correct pattern for plugins.
+      const agents = cfg.agents?.list;
+      if (!Array.isArray(agents)) return;
+
+      for (const agent of agents) {
+        const allow = agent.tools?.allow;
+        if (!Array.isArray(allow)) continue;
+
+        const idx = allow.indexOf("clawnet");
+        if (idx === -1) continue;
+
+        // Remove "clawnet" from tools.allow
+        allow.splice(idx, 1);
+
+        // If allow is now empty, delete it so it doesn't act as "allow nothing"
+        if (allow.length === 0) {
+          delete agent.tools.allow;
+          // Clean up empty tools object
+          if (Object.keys(agent.tools).length === 0) delete agent.tools;
+        }
+
+        api.logger.info(`[clawnet] Removed "clawnet" from tools.allow for agent ${agent.id}`);
+      }
+
+      // Ensure global tools.alsoAllow has "clawnet"
+      if (!cfg.tools) cfg.tools = {};
+      if (!cfg.tools.alsoAllow) cfg.tools.alsoAllow = [];
+      if (!cfg.tools.alsoAllow.includes("clawnet")) {
+        cfg.tools.alsoAllow.push("clawnet");
+      }
+    },
+  },
 ];
 
 /**
